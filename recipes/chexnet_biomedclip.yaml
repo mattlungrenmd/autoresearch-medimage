@@ -1,0 +1,38 @@
+# CheXNet with BiomedCLIP backbone — Microsoft's medical foundation model
+# BiomedCLIP pretrained on PMC-15M (PubMed Central image-text pairs)
+#
+# Expected: Mean AUC improvement over ImageNet-pretrained DenseNet-121
+# due to domain-specific pretraining on medical literature
+
+paper:
+  title: "CheXNet with BiomedCLIP backbone"
+  dataset: "NIH ChestX-ray14"
+  reported_metric: "Mean AUC ~86-88% (expected with medical pretraining)"
+
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: "hf:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224"
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.00005
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: bce
+  class_weights: true
+
+notes: |
+  BiomedCLIP (Microsoft) is a vision-language model pretrained on 15M
+  biomedical image-text pairs from PubMed Central. The vision encoder
+  (ViT-B/16) learns medical-domain features that transfer well to
+  downstream tasks. Use lower learning rate (5e-5) since the features
+  are already domain-adapted. AdamW with weight decay helps regularize
+  the large ViT backbone.

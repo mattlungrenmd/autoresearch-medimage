@@ -1,0 +1,47 @@
+# Brain MRI Segmentation — Lower-Grade Glioma (LGG)
+# U-Net baseline for brain tumor boundary segmentation
+#
+# Target: Dice coefficient 85%+
+
+paper:
+  title: "Brain MRI Segmentation with U-Net"
+  dataset: "LGG MRI Segmentation — Kaggle (TCIA)"
+  reported_metric: "Dice 85%+"
+
+dataset: brain_mri
+task: segmentation
+
+model:
+  architecture: unet
+  base_channels: 64
+  in_channels: 3
+  pretrained: false
+
+training:
+  batch_size: 8
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: dice_bce
+  dice_weight: 0.5
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: true
+  rotation: 15
+
+image_size: 256
+
+notes: |
+  Brain MRI tumor segmentation is a core medical imaging task.
+  U-Net is the standard baseline. Improvements to try:
+  - Attention U-Net (attention gates at skip connections)
+  - Pretrained encoder (ResNet-34 encoder + U-Net decoder)
+  - Dice + focal loss combination
+  - Larger resolution (384 or 512)
+  - Deep supervision (auxiliary losses at intermediate scales)
+  nnU-Net typically achieves Dice 88-92% on similar brain tumor tasks.

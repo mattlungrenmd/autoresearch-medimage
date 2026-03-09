@@ -1,0 +1,7 @@
+split,image_path,label
+train,images/neg_train_1.pgm,0
+train,images/neg_train_2.pgm,0
+train,images/pos_train_1.pgm,1
+train,images/pos_train_2.pgm,1
+val,images/neg_val_1.pgm,0
+val,images/pos_val_1.pgm,1

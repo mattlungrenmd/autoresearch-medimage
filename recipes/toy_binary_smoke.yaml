@@ -1,0 +1,29 @@
+# Tiny local fixture for CPU smoke tests.
+# This is not a benchmark recipe; it just exercises the end-to-end loop quickly.
+
+dataset: toy_binary
+
+model:
+  backbone: resnet18
+  pretrained: false
+  dropout: 0.1
+
+training:
+  batch_size: 4
+  optimizer: adam
+  learning_rate: 0.001
+  weight_decay: 0.0
+  warmup_ratio: 0.0
+  warmdown_ratio: 0.0
+
+loss:
+  type: cross_entropy
+  class_weights: false
+
+augmentation:
+  horizontal_flip: false
+  vertical_flip: false
+  rotation: 0
+  color_jitter: false
+
+image_size: 64

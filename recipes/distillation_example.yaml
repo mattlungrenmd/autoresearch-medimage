@@ -1,0 +1,37 @@
+# Knowledge distillation example — distill a large teacher into a compact student.
+# First train the teacher: uv run train.py --recipe chexnet_advanced --save-checkpoint
+# Then run this recipe pointing to the teacher checkpoint.
+
+dataset: chestxray14
+
+model:
+  backbone: efficientnet_b0   # compact student model (~5M params)
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  optimizer: adamw
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: bce
+  class_weights: true
+
+advanced:
+  distillation: true
+  teacher_checkpoint: "checkpoints/chestxray14_densenet121_best.pth"
+  distill_alpha: 0.5          # 50% task loss + 50% distillation loss
+  distill_temperature: 3.0    # higher = softer teacher targets
+  grad_clip_norm: 1.0
+  ema: true
+  ema_decay: 0.999
+  lr_schedule: cosine
+  compute_ci: true
+
+paper:
+  title: "Knowledge Distillation for CheXNet"
+  description: "Distill DenseNet-121 teacher into EfficientNet-B0 student"

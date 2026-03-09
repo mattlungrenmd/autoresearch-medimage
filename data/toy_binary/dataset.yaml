@@ -1,0 +1,14 @@
+name: toy_binary
+task: classification
+metric: auc
+num_classes: 2
+class_names:
+  - negative
+  - positive
+in_channels: 1
+image_size: 64
+mean:
+  - 0.5
+std:
+  - 0.25
+description: Tiny binary toy dataset for CPU smoke tests and contract validation.

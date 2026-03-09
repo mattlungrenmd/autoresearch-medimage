@@ -1,0 +1,47 @@
+# CheXNet: Radiologist-Level Pneumonia Detection on Chest X-Rays with Deep Learning
+# Rajpurkar et al., 2017 — https://arxiv.org/abs/1711.05225
+#
+# Original results: Mean AUC 84.1% across 14 pathologies on ChestX-ray14
+# Reproduction target: Mean AUC ~84-85%
+
+paper:
+  title: "CheXNet: Radiologist-Level Pneumonia Detection on Chest X-Rays with Deep Learning"
+  authors: "Rajpurkar, Irvin, Zhu, et al."
+  year: 2017
+  arxiv: "1711.05225"
+  dataset: "NIH ChestX-ray14"
+  reported_metric: "Mean AUC 84.1%"
+
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: densenet121
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adam
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  warmup_ratio: 0.02
+  warmdown_ratio: 0.3
+
+loss:
+  type: bce
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 0
+  color_jitter: false
+
+notes: |
+  The original CheXNet paper used DenseNet-121 pretrained on ImageNet with a
+  single fully-connected layer outputting 14 sigmoid probabilities. Training used
+  Adam optimizer. The model was trained on the official train split and evaluated
+  on the official test split of ChestX-ray14 (112,120 frontal-view X-rays from
+  30,805 patients). A 2025 reproduction study (arxiv 2505.06646) found that
+  switching to AdamW + focal loss + color jitter improved results to ~85% AUC.

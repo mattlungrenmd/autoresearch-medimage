@@ -1,0 +1,37 @@
+# CheXNet with RAD-DINO backbone — Microsoft's radiology-specific DINO model
+# RAD-DINO pretrained with self-supervised DINO on radiology images
+#
+# Expected: Strong performance on chest X-ray tasks due to
+# radiology-specific visual features
+
+paper:
+  title: "CheXNet with RAD-DINO backbone"
+  dataset: "NIH ChestX-ray14"
+  reported_metric: "Mean AUC ~86-88% (expected with radiology pretraining)"
+
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: "hf:microsoft/rad-dino"
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.00005
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: bce
+  class_weights: true
+
+notes: |
+  RAD-DINO (Microsoft) applies the DINO self-supervised learning framework
+  to radiology images. The resulting ViT encoder captures radiology-specific
+  features (anatomy, pathology patterns) without requiring labeled data.
+  This makes it especially well-suited for chest X-ray classification tasks.
+  Use low learning rate to preserve pretrained features.

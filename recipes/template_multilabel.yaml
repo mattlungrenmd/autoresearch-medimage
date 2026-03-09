@@ -1,0 +1,30 @@
+# Template: custom 2D multilabel baseline
+# Copy this recipe and change the dataset name and hyperparameters for your task.
+
+dataset: your_dataset
+task: multilabel
+
+model:
+  backbone: densenet121
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: focal
+  focal_gamma: 2.0
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 10
+  color_jitter: false
+  clahe: true

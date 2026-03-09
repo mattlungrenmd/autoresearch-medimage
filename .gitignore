@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data cache (Kaggle datasets)
+data/*
+!data/toy_binary/
+!data/toy_binary/**
+
+# Training artifacts
+run.log
+results.tsv
+checkpoints/
+*.pth
+*.pt
+
+# Kaggle credentials (NEVER commit)
+kaggle.json
+
+# Medical imaging artifacts
+*.dcm
+*.nii
+*.nii.gz
+
+# Agent files (generated per-session)
+AGENTS.md
+
+# Dev
+dev/
+worktrees/
+.claude/worktrees/
+.claude/settings.local.json
+TEAM_CLEANUP_HANDOFF.md
+
+# Generated outputs
+paper/generated/
+paper/paper.tex
+regulatory/generated/
+regulatory/output/
+
+# IDE
+.vscode/
+.idea/

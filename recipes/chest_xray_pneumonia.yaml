@@ -1,0 +1,42 @@
+# Chest X-ray Pneumonia Detection — Binary Classification
+# Based on Kermany et al., 2018 dataset (subset of OCT paper)
+#
+# Simple binary: Normal vs Pneumonia
+# Target: AUC 98%+
+
+paper:
+  title: "Chest X-ray Pneumonia Detection"
+  dataset: "Chest X-ray Images (Pneumonia) — Kaggle"
+  reported_metric: "AUC 98%+"
+
+dataset: chest_xray
+task: classification
+
+model:
+  backbone: densenet121
+  pretrained: true
+  dropout: 0.3
+
+training:
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: cross_entropy
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 10
+  color_jitter: false
+
+notes: |
+  The chest X-ray pneumonia dataset has significant class imbalance
+  (more pneumonia than normal). Class-weighted loss is essential.
+  DenseNet-121 (same architecture as CheXNet) works well as baseline.
+  Key improvements: focal loss, CLAHE preprocessing, larger resolution.
