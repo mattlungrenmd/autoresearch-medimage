@@ -74,6 +74,8 @@ def apply_recipe(recipe):
     global OPTIMIZER, WEIGHT_DECAY, WARMUP_RATIO, WARMDOWN_RATIO
     global USE_CLASS_WEIGHTS, LABEL_SMOOTHING, LOSS_TYPE, FOCAL_GAMMA
     global SEG_BATCH_SIZE, SEG_BASE_CHANNELS, IMAGE_SIZE_OVERRIDE, AUGMENTATION_CONFIG
+    global GRAD_ACCUM_STEPS, USE_EMA, EMA_DECAY, USE_TTA, USE_MIXUP, MIXUP_ALPHA
+    global USE_GRADUAL_UNFREEZE, UNFREEZE_AFTER_RATIO, DISCRIMINATIVE_LR, BACKBONE_LR_FACTOR
 
     if "dataset" in recipe:
         DATASET = recipe["dataset"]
@@ -103,6 +105,20 @@ def apply_recipe(recipe):
         LOSS_TYPE = loss.get("type", LOSS_TYPE)
         FOCAL_GAMMA = loss.get("focal_gamma", FOCAL_GAMMA)
         USE_CLASS_WEIGHTS = loss.get("class_weights", USE_CLASS_WEIGHTS)
+
+    # Advanced training options
+    advanced = recipe.get("advanced", {})
+    if isinstance(advanced, dict):
+        GRAD_ACCUM_STEPS = advanced.get("grad_accum_steps", GRAD_ACCUM_STEPS)
+        USE_EMA = advanced.get("ema", USE_EMA)
+        EMA_DECAY = advanced.get("ema_decay", EMA_DECAY)
+        USE_TTA = advanced.get("tta", USE_TTA)
+        USE_MIXUP = advanced.get("mixup", USE_MIXUP)
+        MIXUP_ALPHA = advanced.get("mixup_alpha", MIXUP_ALPHA)
+        USE_GRADUAL_UNFREEZE = advanced.get("gradual_unfreeze", USE_GRADUAL_UNFREEZE)
+        UNFREEZE_AFTER_RATIO = advanced.get("unfreeze_after_ratio", UNFREEZE_AFTER_RATIO)
+        DISCRIMINATIVE_LR = advanced.get("discriminative_lr", DISCRIMINATIVE_LR)
+        BACKBONE_LR_FACTOR = advanced.get("backbone_lr_factor", BACKBONE_LR_FACTOR)
 
     IMAGE_SIZE_OVERRIDE = recipe.get("image_size", None)
     augmentation = recipe.get("augmentation", {})
@@ -144,6 +160,18 @@ LABEL_SMOOTHING = 0.0         # label smoothing for classification
 LOSS_TYPE = "auto"            # "auto", "bce", "cross_entropy", "focal", "dice_bce"
 FOCAL_GAMMA = 2.0             # gamma for focal loss
 
+# Advanced training
+GRAD_ACCUM_STEPS = 1          # gradient accumulation steps (effective BS = BATCH_SIZE * GRAD_ACCUM_STEPS)
+USE_EMA = False               # exponential moving average of model weights
+EMA_DECAY = 0.999             # EMA decay rate
+USE_TTA = False               # test-time augmentation (horizontal flip)
+USE_MIXUP = False             # MixUp regularization
+MIXUP_ALPHA = 0.2             # MixUp interpolation strength
+USE_GRADUAL_UNFREEZE = False  # freeze backbone initially, then unfreeze
+UNFREEZE_AFTER_RATIO = 0.1    # fraction of time budget before unfreezing backbone
+DISCRIMINATIVE_LR = False     # lower LR for backbone, higher for head
+BACKBONE_LR_FACTOR = 0.1      # backbone LR = LEARNING_RATE * this factor
+
 # Segmentation-specific
 SEG_BATCH_SIZE = 8            # batch size for segmentation (larger images)
 SEG_BASE_CHANNELS = 64        # U-Net base channels
@@ -179,9 +207,23 @@ def format_metric_for_filename(metric_value):
 def build_results_description(dataset, task, backbone_name, loss_type, recipe_name):
     """Encode enough context to compare runs from the same task in results.tsv."""
     recipe_value = recipe_name or "-"
+    extras = []
+    if USE_EMA:
+        extras.append("ema")
+    if USE_TTA:
+        extras.append("tta")
+    if USE_MIXUP:
+        extras.append("mixup")
+    if USE_GRADUAL_UNFREEZE:
+        extras.append("unfreeze")
+    if DISCRIMINATIVE_LR:
+        extras.append("disc_lr")
+    if GRAD_ACCUM_STEPS > 1:
+        extras.append(f"accum{GRAD_ACCUM_STEPS}")
+    extras_str = "+".join(extras) if extras else "-"
     return (
         f"dataset={dataset};task={task};backbone={backbone_name};"
-        f"recipe={recipe_value};loss={loss_type}"
+        f"recipe={recipe_value};loss={loss_type};extras={extras_str}"
     )
 
 
@@ -502,6 +544,61 @@ def get_lr_multiplier(progress):
 
 
 # ---------------------------------------------------------------------------
+# EMA (Exponential Moving Average)
+# ---------------------------------------------------------------------------
+
+class ModelEMA:
+    """Maintains an exponential moving average of model parameters."""
+
+    def __init__(self, model, decay=0.999):
+        import copy
+        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+        self.ema_model = copy.deepcopy(raw)
+        self.ema_model.eval()
+        self.decay = decay
+        for p in self.ema_model.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model):
+        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+        for ema_p, model_p in zip(self.ema_model.parameters(), raw.parameters()):
+            ema_p.data.mul_(self.decay).add_(model_p.data, alpha=1.0 - self.decay)
+
+
+# ---------------------------------------------------------------------------
+# MixUp
+# ---------------------------------------------------------------------------
+
+def mixup_data(images, targets, alpha=0.2):
+    """Apply MixUp augmentation. Returns mixed inputs and pair of targets with lambda."""
+    lam = torch.distributions.Beta(alpha, alpha).sample().item() if alpha > 0 else 1.0
+    batch_size = images.size(0)
+    index = torch.randperm(batch_size, device=images.device)
+    mixed_images = lam * images + (1 - lam) * images[index]
+    return mixed_images, targets, targets[index], lam
+
+
+def mixup_criterion(criterion, logits, targets_a, targets_b, lam):
+    """Compute MixUp loss as weighted combination."""
+    return lam * criterion(logits, targets_a) + (1 - lam) * criterion(logits, targets_b)
+
+
+# ---------------------------------------------------------------------------
+# Test-Time Augmentation
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def tta_predict(model, images, device):
+    """Average predictions over original + horizontally flipped images."""
+    autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+    with autocast_ctx:
+        logits1 = model(images.to(device))
+        logits2 = model(torch.flip(images.to(device), dims=[-1]))
+    return (logits1 + logits2) / 2.0
+
+
+# ---------------------------------------------------------------------------
 # Checkpointing
 # ---------------------------------------------------------------------------
 
@@ -611,22 +708,47 @@ def main():
     print(f"Pretrained: {PRETRAINED}")
     print(f"Parameters: {num_params:,}")
 
+    # Gradual unfreezing: freeze backbone initially
+    if USE_GRADUAL_UNFREEZE and task in ("classification", "multilabel"):
+        raw = model
+        if hasattr(model, "_orig_mod"):
+            raw = model._orig_mod
+        for param in raw.encoder.parameters():
+            param.requires_grad = False
+        print("Gradual unfreeze: backbone frozen initially")
+
     # Compile model
     model = torch.compile(model, dynamic=False)
 
-    # Optimizer
+    # EMA setup
+    ema = None
+    if USE_EMA:
+        ema = ModelEMA(model, decay=EMA_DECAY)
+        print(f"EMA enabled (decay={EMA_DECAY})")
+
+    # Optimizer — with discriminative LR if enabled
+    if DISCRIMINATIVE_LR and task in ("classification", "multilabel"):
+        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+        param_groups = [
+            {"params": raw.encoder.parameters(), "lr": LEARNING_RATE * BACKBONE_LR_FACTOR},
+            {"params": raw.head.parameters(), "lr": LEARNING_RATE},
+            {"params": raw.dropout.parameters(), "lr": LEARNING_RATE},
+        ]
+        print(f"Discriminative LR: backbone={LEARNING_RATE * BACKBONE_LR_FACTOR:.6f}, head={LEARNING_RATE:.6f}")
+    else:
+        param_groups = [{"params": model.parameters(), "lr": LEARNING_RATE}]
+
     if OPTIMIZER == "adam":
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY,
+            param_groups, weight_decay=WEIGHT_DECAY,
         )
     elif OPTIMIZER == "adamw":
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY,
+            param_groups, weight_decay=WEIGHT_DECAY,
         )
     elif OPTIMIZER == "sgd":
         optimizer = torch.optim.SGD(
-            model.parameters(), lr=LEARNING_RATE,
-            momentum=0.9, weight_decay=WEIGHT_DECAY,
+            param_groups, momentum=0.9, weight_decay=WEIGHT_DECAY,
         )
     else:
         raise ValueError(f"Unknown optimizer: {OPTIMIZER}")
@@ -716,6 +838,16 @@ def main():
     smooth_train_loss = 0
     total_training_time = 0
     step = 0
+    accum_step = 0
+    lrm = 0.0  # will be set on first optimizer step
+    backbone_unfrozen = not USE_GRADUAL_UNFREEZE
+
+    if GRAD_ACCUM_STEPS > 1:
+        print(f"Gradient accumulation: {GRAD_ACCUM_STEPS} steps (effective BS={batch_size * GRAD_ACCUM_STEPS})")
+    if USE_MIXUP:
+        print(f"MixUp enabled (alpha={MIXUP_ALPHA})")
+    if USE_TTA:
+        print("TTA enabled (horizontal flip)")
 
     model.train()
 
@@ -726,22 +858,54 @@ def main():
         images_d = images.to(device, non_blocking=True)
         targets_d = targets.to(device, non_blocking=True)
 
+        # MixUp
+        if USE_MIXUP:
+            images_d, targets_a, targets_b, lam = mixup_data(images_d, targets_d, MIXUP_ALPHA)
+
         with autocast_ctx:
             logits = model(images_d)
-            loss = criterion(logits, targets_d)
+            if USE_MIXUP:
+                loss = mixup_criterion(criterion, logits, targets_a, targets_b, lam)
+            else:
+                loss = criterion(logits, targets_d)
+            if GRAD_ACCUM_STEPS > 1:
+                loss = loss / GRAD_ACCUM_STEPS
 
         scaler.scale(loss).backward()
+        accum_step += 1
 
-        progress = min(total_training_time / TIME_BUDGET, 1.0)
-        lrm = get_lr_multiplier(progress)
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = LEARNING_RATE * lrm
+        # Only step optimizer after accumulation
+        if accum_step % GRAD_ACCUM_STEPS == 0:
+            progress = min(total_training_time / TIME_BUDGET, 1.0)
+            lrm = get_lr_multiplier(progress)
 
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
+            # Gradual unfreeze check
+            if not backbone_unfrozen and progress >= UNFREEZE_AFTER_RATIO:
+                raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+                for param in raw.encoder.parameters():
+                    param.requires_grad = True
+                backbone_unfrozen = True
+                print(f"\nBackbone unfrozen at {progress*100:.1f}% progress")
 
-        train_loss_f = loss.item()
+            if DISCRIMINATIVE_LR:
+                for i, param_group in enumerate(optimizer.param_groups):
+                    if i == 0:  # backbone
+                        param_group["lr"] = LEARNING_RATE * BACKBONE_LR_FACTOR * lrm
+                    else:  # head / dropout
+                        param_group["lr"] = LEARNING_RATE * lrm
+            else:
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = LEARNING_RATE * lrm
+
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+
+            # EMA update
+            if ema is not None:
+                ema.update(model)
+
+        train_loss_f = loss.item() * (GRAD_ACCUM_STEPS if GRAD_ACCUM_STEPS > 1 else 1)
 
         if train_loss_f > 100 or train_loss_f != train_loss_f:
             print("FAIL: loss exploded or NaN")
@@ -759,13 +923,15 @@ def main():
         ema_beta = 0.9
         smooth_train_loss = ema_beta * smooth_train_loss + (1 - ema_beta) * train_loss_f
         debiased_smooth_loss = smooth_train_loss / (1 - ema_beta ** (step + 1))
+        progress = min(total_training_time / TIME_BUDGET, 1.0)
         pct_done = 100 * progress
         remaining = max(0, TIME_BUDGET - total_training_time)
+        current_lr = LEARNING_RATE * lrm
 
         print(
             f"\rstep {step:05d} ({pct_done:.1f}%) | "
             f"loss: {debiased_smooth_loss:.4f} | "
-            f"lr: {LEARNING_RATE * lrm:.6f} | "
+            f"lr: {current_lr:.6f} | "
             f"dt: {dt * 1000:.0f}ms | "
             f"epoch: {epoch} | "
             f"remaining: {remaining:.0f}s    ",
@@ -790,13 +956,19 @@ def main():
     # Evaluation
     # -----------------------------------------------------------------------
 
-    model.eval()
+    # Use EMA model for evaluation if available
+    eval_model = model
+    if ema is not None:
+        eval_model = ema.ema_model.to(device)
+        print("Using EMA model for evaluation")
+
+    eval_model.eval()
     print("---")
     primary_metric_key = metric_key_for_dataset(cfg, task)
 
     if is_multilabel:
         results = evaluate_multilabel(
-            model,
+            eval_model,
             dataset,
             batch_size,
             device,
@@ -811,7 +983,7 @@ def main():
 
     elif task == "classification":
         results = evaluate_classification(
-            model,
+            eval_model,
             dataset,
             batch_size,
             device,
@@ -826,7 +998,7 @@ def main():
 
     elif task == "segmentation":
         results = evaluate_segmentation(
-            model,
+            eval_model,
             dataset,
             batch_size,
             device,
@@ -873,11 +1045,19 @@ def main():
             "dataset": dataset, "task": task, "backbone": backbone_name,
             "num_classes": num_classes, "batch_size": batch_size,
             "optimizer": OPTIMIZER, "learning_rate": LEARNING_RATE,
-            "loss": loss_type, "recipe": args.recipe,
+            "weight_decay": WEIGHT_DECAY, "loss": loss_type,
+            "recipe": args.recipe, "dropout": DROPOUT,
+            "ema": USE_EMA, "tta": USE_TTA, "mixup": USE_MIXUP,
+            "grad_accum_steps": GRAD_ACCUM_STEPS,
+            "gradual_unfreeze": USE_GRADUAL_UNFREEZE,
+            "discriminative_lr": DISCRIMINATIVE_LR,
+            "image_size": IMAGE_SIZE_OVERRIDE,
+            "augmentation_config": AUGMENTATION_CONFIG,
         }
         ckpt_name = f"{dataset}_{backbone_name}_{format_metric_for_filename(primary_metric)}.pth"
         ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt_name)
-        save_checkpoint(model, results, ckpt_config, ckpt_path)
+        save_model = ema.ema_model if ema is not None else model
+        save_checkpoint(save_model, results, ckpt_config, ckpt_path)
 
 
 if __name__ == "__main__":

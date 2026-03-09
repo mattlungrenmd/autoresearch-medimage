@@ -10,16 +10,180 @@ Usage:
     python regulatory/generate_regulatory.py --type ce           # CE/MDR only
     python regulatory/generate_regulatory.py --type ukca         # UKCA only
     python regulatory/generate_regulatory.py --results results.tsv  # Use experiment data
+    python regulatory/generate_regulatory.py --checkpoint checkpoints/best.pth  # Use checkpoint
 """
 
 import os
 import argparse
+import csv
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
 REGULATORY_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(REGULATORY_DIR)
 TEMPLATES_DIR = os.path.join(REGULATORY_DIR, "templates")
 OUTPUT_DIR = os.path.join(REGULATORY_DIR, "output")
+RESULTS_FILE = os.path.join(PROJECT_DIR, "results.tsv")
+CHECKPOINT_DIR = os.path.join(PROJECT_DIR, "checkpoints")
+
+
+# ---------------------------------------------------------------------------
+# Auto-detection helpers
+# ---------------------------------------------------------------------------
+
+def auto_detect_from_results(results_path, dataset_filter=None):
+    """Read best metric and config from results.tsv."""
+    info = {"best_metric": None, "backbone": None, "loss": None, "extras": None}
+    if not os.path.exists(results_path):
+        return info
+
+    try:
+        best = None
+        best_desc = ""
+        with open(results_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f, delimiter="\t")
+            for row in reader:
+                desc = row.get("description", "")
+                if dataset_filter and f"dataset={dataset_filter};" not in desc:
+                    continue
+                try:
+                    metric = float(row["metric"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if best is None or metric > best:
+                    best = metric
+                    best_desc = desc
+
+        if best is not None:
+            info["best_metric"] = f"{best:.2f}"
+            # Parse description
+            for part in best_desc.split(";"):
+                if "=" in part:
+                    key, val = part.split("=", 1)
+                    key = key.strip()
+                    if key == "backbone":
+                        info["backbone"] = val.strip()
+                    elif key == "loss":
+                        info["loss"] = val.strip()
+                    elif key == "extras":
+                        info["extras"] = val.strip()
+    except Exception:
+        pass
+    return info
+
+
+def auto_detect_from_checkpoint(checkpoint_path):
+    """Read config and per-class results from a checkpoint."""
+    info = {"backbone": None, "per_class_auc": None, "config": {}}
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        return info
+    try:
+        import torch
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        cfg = ckpt.get("config", {})
+        results = ckpt.get("results", {})
+        info["config"] = cfg
+        info["backbone"] = cfg.get("backbone")
+        if "per_class_auc" in results:
+            info["per_class_auc"] = results["per_class_auc"]
+        return info
+    except Exception:
+        return info
+
+
+def generate_sbom():
+    """Generate SBOM from pyproject.toml and installed packages."""
+    lines = []
+
+    # Try reading pyproject.toml for declared dependencies
+    pyproject = os.path.join(PROJECT_DIR, "pyproject.toml")
+    declared_deps = []
+    if os.path.exists(pyproject):
+        with open(pyproject, encoding="utf-8") as f:
+            in_deps = False
+            for line in f:
+                if "dependencies" in line and "=" in line:
+                    in_deps = True
+                    continue
+                if in_deps:
+                    line = line.strip()
+                    if line.startswith("]"):
+                        break
+                    if line.startswith('"') or line.startswith("'"):
+                        dep = line.strip('",\' ')
+                        if dep:
+                            declared_deps.append(dep)
+
+    # Try getting installed versions via uv
+    installed = {}
+    try:
+        result = subprocess.run(
+            ["uv", "pip", "list", "--format=columns"],
+            capture_output=True, text=True, timeout=10,
+            cwd=PROJECT_DIR,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n")[2:]:  # skip header
+                parts = line.split()
+                if len(parts) >= 2:
+                    installed[parts[0].lower()] = parts[1]
+    except Exception:
+        pass
+
+    # Build SBOM table
+    lines.append("| Package | Declared | Installed | Risk | Mitigation |")
+    lines.append("|---------|----------|-----------|------|------------|")
+
+    risk_map = {
+        "torch": ("High", "Core ML framework — pinned version, widely validated"),
+        "torchvision": ("Medium", "Image transforms — pinned to torch version"),
+        "timm": ("Medium", "Pretrained model weights — checksums verified"),
+        "transformers": ("Medium", "Foundation models — pinned version"),
+        "numpy": ("Low", "Numerical computation — widely validated"),
+        "pillow": ("Low", "Image I/O only"),
+        "pandas": ("Low", "Data loading — no inference path"),
+        "scikit-learn": ("Low", "Metrics computation only"),
+        "pyyaml": ("Low", "Config parsing only"),
+        "albumentations": ("Low", "Image augmentation only"),
+    }
+
+    for dep in declared_deps:
+        # Extract package name from version spec
+        pkg_name = dep.split(">=")[0].split("<=")[0].split("==")[0].split(">")[0].split("<")[0].strip()
+        pkg_lower = pkg_name.lower()
+        version_spec = dep[len(pkg_name):].strip() or "any"
+        installed_ver = installed.get(pkg_lower, "[not installed]")
+        risk, mitigation = risk_map.get(pkg_lower, ("Low", "Standard dependency"))
+        lines.append(f"| {pkg_name} | {version_spec} | {installed_ver} | {risk} | {mitigation} |")
+
+    return "\n".join(lines) if lines else "| [Run `uv sync` to populate] | | | | |"
+
+
+def format_per_class_for_regulatory(per_class_auc):
+    """Format per-class AUC as a markdown table for regulatory docs."""
+    if not per_class_auc:
+        return "[INSERT per_class_auc table from model evaluation]"
+
+    lines = ["| Pathology | AUC (%) | 95% CI |"]
+    lines.append("|-----------|--------|--------|")
+    for pathology, auc in per_class_auc.items():
+        pathology_clean = pathology.replace("_", " ")
+        lines.append(f"| {pathology_clean} | {auc:.2f} | [CI] |")
+
+    mean_auc = sum(per_class_auc.values()) / len(per_class_auc)
+    lines.append(f"| **Mean** | **{mean_auc:.2f}** | [CI] |")
+    return "\n".join(lines)
+
+
+BACKBONE_PRETTY = {
+    "densenet121": "DenseNet-121", "densenet169": "DenseNet-169",
+    "densenet201": "DenseNet-201", "resnet50": "ResNet-50",
+    "efficientnet_b0": "EfficientNet-B0", "efficientnet_b3": "EfficientNet-B3",
+    "efficientnet_b4": "EfficientNet-B4", "convnext_small": "ConvNeXt-Small",
+    "swin_tiny_patch4_window7_224": "Swin-Tiny",
+    "vit_small_patch16_224": "ViT-Small", "unet": "U-Net",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +199,9 @@ def generate_fda_510k(config):
     metric_name = config.get("metric_name", "AUC")
     best_metric = config.get("best_metric", "[XX.XX]")
     backbone = config.get("backbone", "[MODEL ARCHITECTURE]")
+    sbom = config.get("sbom", "")
+    per_class_table = config.get("per_class_table", "[INSERT per_class_auc table from model evaluation]")
+    torch_version = config.get("torch_version", "[VERSION]")
 
     return f"""# FDA 510(k) Presubmission — {device_name}
 # Generated: {datetime.now().strftime('%Y-%m-%d')}
@@ -99,7 +266,7 @@ predicate devices and their 510(k) numbers.]
 | NPV | [XX.X]% | [CI] | [BENCHMARK] |
 
 ### 3.2 Per-Pathology Performance
-[INSERT per_class_auc table from model evaluation]
+{per_class_table}
 
 ### 3.3 Reader Study Design
 [REQUIRED: Design a multi-reader multi-case (MRMC) study]
@@ -119,21 +286,15 @@ predicate devices and their 510(k) numbers.]
 ### 4.2 Software Description
 | Component | Description |
 |-----------|-------------|
-| Framework | PyTorch {config.get('torch_version', '[VERSION]')} |
+| Framework | PyTorch {torch_version} |
 | Model | {backbone} (pretrained ImageNet + fine-tuned) |
-| Libraries | timm, torchvision, albumentations |
+| Libraries | timm, torchvision |
 | Input format | DICOM, PNG, JPEG |
 | Output format | JSON (pathology probabilities) |
 | OS | Linux (inference server) |
 
 ### 4.3 SOUP (Software of Unknown Provenance)
-| Library | Version | Risk | Mitigation |
-|---------|---------|------|------------|
-| PyTorch | [VER] | Medium | Widely validated, pinned version |
-| timm | [VER] | Medium | Pretrained weights verified |
-| albumentations | [VER] | Low | Preprocessing only |
-| numpy | [VER] | Low | Widely validated |
-| Pillow | [VER] | Low | Image I/O only |
+{sbom}
 
 ---
 
@@ -143,7 +304,7 @@ predicate devices and their 510(k) numbers.]
 [FILL IN: STRIDE analysis for your deployment scenario]
 
 ### 5.2 SBOM (Software Bill of Materials)
-[Generate from `pip freeze` or `uv pip list`]
+See Section 4.3 above for declared dependencies with versions and risk assessment.
 
 ---
 
@@ -151,7 +312,7 @@ predicate devices and their 510(k) numbers.]
 
 ### 6.1 Warnings and Precautions
 - This device is intended to assist, not replace, clinical judgment
-- Performance validated on [DATASET] — may not generalize to all populations
+- Performance validated on {dataset} — may not generalize to all populations
 - Not validated for pediatric patients (< 18 years)
 - Not validated for images with implanted devices
 - [ADD population-specific limitations]
@@ -187,6 +348,7 @@ def generate_ce_mdr(config):
     intended_use = config.get("intended_use", "[INTENDED USE STATEMENT]")
     best_metric = config.get("best_metric", "[XX.XX]")
     metric_name = config.get("metric_name", "AUC")
+    backbone = config.get("backbone", "[MODEL ARCHITECTURE]")
 
     return f"""# CE Marking — EU MDR 2017/745 Documentation
 # Device: {device_name}
@@ -237,26 +399,31 @@ Class IIb or III. Consult with your Notified Body.
 Clinical evaluation of {device_name} for {intended_use}, per MDR Article 61
 and MEDDEV 2.7/1 Rev 4.
 
-### 3.2 Clinical Data Sources
+### 3.2 Device Technology
+- **Architecture:** {backbone}
+- **Training data:** ImageNet pretraining + medical dataset fine-tuning
+- **Performance:** {best_metric}% {metric_name}
+
+### 3.3 Clinical Data Sources
 1. **Literature review:** Systematic search of PubMed, Embase for comparable AI devices
 2. **Clinical investigation data:** [Validation study results]
 3. **Post-market data:** [To be collected]
 4. **Equivalent device data:** [If applicable]
 
-### 3.3 State of the Art
+### 3.4 State of the Art
 [FILL IN: Current standard of care, existing AI devices, clinical need]
 
-### 3.4 Performance Summary
+### 3.5 Performance Summary
 | Metric | Our Device | Literature Benchmark | Clinical Significance |
 |--------|-----------|---------------------|----------------------|
 | {metric_name} | {best_metric}% | [BENCHMARK] | [SIGNIFICANCE] |
 | Sensitivity | [XX.X]% | [BENCHMARK] | [SIGNIFICANCE] |
 | Specificity | [XX.X]% | [BENCHMARK] | [SIGNIFICANCE] |
 
-### 3.5 Benefit-Risk Analysis
+### 3.6 Benefit-Risk Analysis
 [FILL IN: Benefits of AI-assisted diagnosis vs. risks of false positives/negatives]
 
-### 3.6 Conclusions
+### 3.7 Conclusions
 [FILL IN: Device meets GSPR, acceptable benefit-risk ratio, suitable for intended use]
 
 ---
@@ -279,7 +446,7 @@ and MEDDEV 2.7/1 Rev 4.
 ## 5. Quality Management System
 
 **Standard:** ISO 13485:2016
-**Notified Body:** [SELECT — e.g., BSI, TÜV SÜD, SGS, DEKRA]
+**Notified Body:** [SELECT — e.g., BSI, TUV SUD, SGS, DEKRA]
 
 ### 5.1 AI/ML Specific Processes
 - Dataset management and versioning
@@ -320,6 +487,7 @@ def generate_ukca(config):
     intended_use = config.get("intended_use", "[INTENDED USE STATEMENT]")
     best_metric = config.get("best_metric", "[XX.XX]")
     metric_name = config.get("metric_name", "AUC")
+    backbone = config.get("backbone", "[MODEL ARCHITECTURE]")
 
     return f"""# UKCA Marking — UK MDR 2002 (as amended) Documentation
 # Device: {device_name}
@@ -337,6 +505,10 @@ Post-Brexit, the UK has its own medical device regulations:
 ### 1.1 Classification
 **Classification:** Class IIa (analogous to EU MDR Rule 11)
 **UK Approved Body:** [SELECT — e.g., BSI UK, SGS UK]
+
+### 1.2 Device Technology
+- **Architecture:** {backbone}
+- **Performance:** {best_metric}% {metric_name}
 
 ---
 
@@ -451,30 +623,61 @@ def main():
                         help="Best metric value (auto-read from results.tsv if not provided)")
     parser.add_argument("--results", type=str, default=None,
                         help="Path to results.tsv to auto-fill performance data")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to model checkpoint for per-class results and config")
     parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR,
                         help="Output directory for generated docs")
     args = parser.parse_args()
 
-    # Try to read best metric from results
-    best_metric = args.best_metric or "[XX.XX]"
-    if not args.best_metric and args.results:
-        try:
-            import pandas as pd
-            df = pd.read_csv(args.results, sep="\t")
-            if not df.empty and "metric" in df.columns:
-                best_metric = f"{df['metric'].max():.2f}"
-                print(f"Best metric from results: {best_metric}%")
-        except Exception:
-            pass
+    # Auto-detect from results.tsv
+    results_path = args.results or RESULTS_FILE
+    results_info = auto_detect_from_results(results_path, dataset_filter="chestxray14")
+
+    # Auto-detect from checkpoint
+    ckpt_path = args.checkpoint
+    if not ckpt_path and os.path.isdir(CHECKPOINT_DIR):
+        ckpts = sorted(Path(CHECKPOINT_DIR).glob("*.pth"), key=os.path.getmtime, reverse=True)
+        if ckpts:
+            ckpt_path = str(ckpts[0])
+    ckpt_info = auto_detect_from_checkpoint(ckpt_path)
+
+    # Determine backbone (checkpoint > results > default)
+    backbone_raw = ckpt_info.get("backbone") or results_info.get("backbone") or "densenet121"
+    backbone = BACKBONE_PRETTY.get(backbone_raw, backbone_raw)
+
+    # Determine best metric
+    best_metric = args.best_metric or results_info.get("best_metric") or "[XX.XX]"
+    if best_metric != "[XX.XX]":
+        print(f"Best metric from results: {best_metric}%")
+
+    # Generate SBOM
+    sbom = generate_sbom()
+
+    # Format per-class AUC
+    per_class_table = format_per_class_for_regulatory(ckpt_info.get("per_class_auc"))
+
+    # Get torch version
+    torch_version = "[VERSION]"
+    try:
+        import torch
+        torch_version = torch.__version__
+    except ImportError:
+        pass
 
     config = {
         "device_name": args.device_name,
         "intended_use": args.intended_use,
+        "indication": args.intended_use,
         "dataset": args.dataset,
         "metric_name": args.metric,
         "best_metric": best_metric,
-        "backbone": "DenseNet-121",
+        "backbone": backbone,
+        "sbom": sbom,
+        "per_class_table": per_class_table,
+        "torch_version": torch_version,
     }
+
+    print(f"Architecture: {backbone}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -495,6 +698,11 @@ def main():
         print(f"Generated: {output_path}")
 
     print(f"\nRegulatory documents generated in {args.output_dir}/")
+    print(f"\nAuto-populated:")
+    print(f"  - Architecture: {backbone}")
+    print(f"  - Best metric: {best_metric}%")
+    print(f"  - SBOM: {'yes' if 'Package' in sbom else 'run uv sync first'}")
+    print(f"  - Per-class AUC: {'yes' if ckpt_info.get('per_class_auc') else 'use --checkpoint flag'}")
     print("\nIMPORTANT: These are templates only. Before any regulatory submission:")
     print("  1. Engage qualified regulatory affairs professionals")
     print("  2. Consult legal counsel experienced in SaMD regulation")
