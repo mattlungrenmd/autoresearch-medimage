@@ -19,7 +19,9 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import gc
 import time
 import argparse
+import csv
 import json
+import subprocess
 from pathlib import Path
 
 import torch
@@ -43,8 +45,10 @@ def load_recipe(recipe_name):
     """Load a recipe YAML file and return config dict."""
     try:
         import yaml
-    except ImportError:
-        yaml = None
+    except ImportError as exc:
+        raise SystemExit(
+            "PyYAML is required for recipe support. Run `uv sync` to install dependencies."
+        ) from exc
 
     recipe_dir = Path(__file__).parent / "recipes"
     recipe_path = recipe_dir / f"{recipe_name}.yaml"
@@ -55,33 +59,13 @@ def load_recipe(recipe_name):
         print(f"Available recipes: {', '.join(sorted(available))}")
         exit(1)
 
-    if yaml is not None:
-        with open(recipe_path) as f:
-            return yaml.safe_load(f)
-    else:
-        # Minimal YAML parser for simple key-value configs (no pyyaml dependency)
-        config = {}
-        with open(recipe_path) as f:
-            content = f.read()
-        # Simple parser: extract key fields we care about
-        import re
-        for line in content.split("\n"):
-            line = line.strip()
-            if line.startswith("#") or not line or line.startswith("-") or line.startswith("|"):
-                continue
-            if ":" in line:
-                key, _, val = line.partition(":")
-                key = key.strip()
-                val = val.strip().strip('"').strip("'")
-                if val.lower() == "true":
-                    val = True
-                elif val.lower() == "false":
-                    val = False
-                elif val.replace(".", "").replace("-", "").isdigit():
-                    val = float(val) if "." in val else int(val)
-                if key and val != "":
-                    config[key] = val
-        return config
+    with open(recipe_path, encoding="utf-8") as f:
+        recipe = yaml.safe_load(f)
+
+    if not isinstance(recipe, dict):
+        raise SystemExit(f"Recipe '{recipe_name}' is invalid: expected a YAML mapping.")
+
+    return recipe
 
 
 def apply_recipe(recipe):
@@ -89,7 +73,7 @@ def apply_recipe(recipe):
     global DATASET, BACKBONE, PRETRAINED, DROPOUT, BATCH_SIZE, LEARNING_RATE
     global OPTIMIZER, WEIGHT_DECAY, WARMUP_RATIO, WARMDOWN_RATIO
     global USE_CLASS_WEIGHTS, LABEL_SMOOTHING, LOSS_TYPE, FOCAL_GAMMA
-    global SEG_BATCH_SIZE, SEG_BASE_CHANNELS, IMAGE_SIZE_OVERRIDE
+    global SEG_BATCH_SIZE, SEG_BASE_CHANNELS, IMAGE_SIZE_OVERRIDE, AUGMENTATION_CONFIG
 
     if "dataset" in recipe:
         DATASET = recipe["dataset"]
@@ -104,7 +88,9 @@ def apply_recipe(recipe):
 
     training = recipe.get("training", {})
     if isinstance(training, dict):
-        BATCH_SIZE = training.get("batch_size", BATCH_SIZE)
+        if "batch_size" in training:
+            BATCH_SIZE = training["batch_size"]
+            SEG_BATCH_SIZE = training["batch_size"]
         LEARNING_RATE = training.get("learning_rate", LEARNING_RATE)
         OPTIMIZER = training.get("optimizer", OPTIMIZER)
         WEIGHT_DECAY = training.get("weight_decay", WEIGHT_DECAY)
@@ -119,6 +105,8 @@ def apply_recipe(recipe):
         USE_CLASS_WEIGHTS = loss.get("class_weights", USE_CLASS_WEIGHTS)
 
     IMAGE_SIZE_OVERRIDE = recipe.get("image_size", None)
+    augmentation = recipe.get("augmentation", {})
+    AUGMENTATION_CONFIG = augmentation if isinstance(augmentation, dict) else {}
 
     paper = recipe.get("paper", {})
     if isinstance(paper, dict) and paper:
@@ -162,9 +150,107 @@ SEG_BASE_CHANNELS = 64        # U-Net base channels
 
 # Image size override (None = use dataset default)
 IMAGE_SIZE_OVERRIDE = None
+AUGMENTATION_CONFIG = {}
 
 # Checkpointing
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
+RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results.tsv")
+
+
+def metric_key_for_dataset(cfg, task):
+    """Map dataset config metrics to the evaluation output keys."""
+    if task == "multilabel":
+        return "mean_auc"
+    if task == "segmentation":
+        return "dice"
+
+    if cfg["metric"] == "quadratic_kappa":
+        return "kappa"
+    return cfg["metric"]
+
+
+def format_metric_for_filename(metric_value):
+    """Keep filenames readable for both 0-1 and percentage-style metrics."""
+    if metric_value < 10:
+        return f"{metric_value:.4f}"
+    return f"{metric_value:.1f}"
+
+
+def build_results_description(dataset, task, backbone_name, loss_type, recipe_name):
+    """Encode enough context to compare runs from the same task in results.tsv."""
+    recipe_value = recipe_name or "-"
+    return (
+        f"dataset={dataset};task={task};backbone={backbone_name};"
+        f"recipe={recipe_value};loss={loss_type}"
+    )
+
+
+def get_git_commit():
+    """Return the current short git commit hash, if available."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return "unknown"
+    return proc.stdout.strip() or "unknown"
+
+
+def ensure_results_file():
+    """Create the default results log if it does not exist."""
+    if os.path.exists(RESULTS_FILE):
+        return
+
+    with open(RESULTS_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerow(["commit", "metric", "memory_gb", "status", "description"])
+
+
+def read_best_metric(dataset, task):
+    """Read the best prior metric for the same dataset/task from results.tsv."""
+    if not os.path.exists(RESULTS_FILE):
+        return None
+
+    best = None
+    with open(RESULTS_FILE, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            description = row.get("description", "")
+            if f"dataset={dataset};" not in description or f"task={task};" not in description:
+                continue
+            try:
+                metric = float(row["metric"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if best is None or metric > best:
+                best = metric
+
+    return best
+
+
+def append_results_row(dataset, task, backbone_name, loss_type, recipe_name, metric_value, peak_vram_mb):
+    """Append a run summary to results.tsv and classify it against prior runs."""
+    ensure_results_file()
+
+    prior_best = read_best_metric(dataset, task)
+    status = "keep" if prior_best is None or metric_value >= prior_best else "discard"
+    description = build_results_description(dataset, task, backbone_name, loss_type, recipe_name)
+
+    with open(RESULTS_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter="\t")
+        writer.writerow([
+            get_git_commit(),
+            f"{metric_value:.6f}",
+            f"{peak_vram_mb / 1024:.2f}",
+            status,
+            description,
+        ])
+
+    return status
 
 # ---------------------------------------------------------------------------
 # Classification Model: CheXNet-style (DenseNet-121 + pretrained)
@@ -601,13 +687,25 @@ def main():
     print(f"Loss: {loss_type}")
 
     # Dataloader
-    train_loader = make_infinite_dataloader(dataset, batch_size, split="train")
+    train_loader = make_infinite_dataloader(
+        dataset,
+        batch_size,
+        split="train",
+        image_size=IMAGE_SIZE_OVERRIDE,
+        augmentation_config=AUGMENTATION_CONFIG,
+    )
     images, targets, epoch = next(train_loader)
 
     print(f"Time budget: {TIME_BUDGET}s")
     print(f"Batch size: {batch_size}")
     print(f"Optimizer: {OPTIMIZER}")
     print(f"Learning rate: {LEARNING_RATE}")
+    if IMAGE_SIZE_OVERRIDE is not None:
+        print(f"Image size: {IMAGE_SIZE_OVERRIDE}")
+    if AUGMENTATION_CONFIG:
+        enabled_augments = ", ".join(sorted(k for k, v in AUGMENTATION_CONFIG.items() if v))
+        if enabled_augments:
+            print(f"Augmentation: {enabled_augments}")
     print()
 
     # -----------------------------------------------------------------------
@@ -694,26 +792,47 @@ def main():
 
     model.eval()
     print("---")
+    primary_metric_key = metric_key_for_dataset(cfg, task)
 
     if is_multilabel:
-        results = evaluate_multilabel(model, dataset, batch_size, device)
-        primary_metric = results["mean_auc"]
+        results = evaluate_multilabel(
+            model,
+            dataset,
+            batch_size,
+            device,
+            image_size=IMAGE_SIZE_OVERRIDE,
+            augmentation_config=AUGMENTATION_CONFIG,
+        )
+        primary_metric = results[primary_metric_key]
         print(f"mean_auc:         {results['mean_auc']:.2f}%")
         print("per_class_auc:")
         for pathology, auc in results["per_class_auc"].items():
             print(f"  {pathology:<22s} {auc:.2f}%")
 
     elif task == "classification":
-        results = evaluate_classification(model, dataset, batch_size, device)
-        primary_metric = results.get("auc", results["accuracy"])
+        results = evaluate_classification(
+            model,
+            dataset,
+            batch_size,
+            device,
+            image_size=IMAGE_SIZE_OVERRIDE,
+            augmentation_config=AUGMENTATION_CONFIG,
+        )
+        primary_metric = results[primary_metric_key]
         print(f"val_accuracy:     {results['accuracy']:.2f}%")
         print(f"val_auc:          {results['auc']:.2f}%")
         print(f"val_kappa:        {results['kappa']:.4f}")
         print(f"val_loss:         {results['loss']:.6f}")
 
     elif task == "segmentation":
-        results = evaluate_segmentation(model, dataset, batch_size, device)
-        primary_metric = results["dice"]
+        results = evaluate_segmentation(
+            model,
+            dataset,
+            batch_size,
+            device,
+            image_size=IMAGE_SIZE_OVERRIDE,
+        )
+        primary_metric = results[primary_metric_key]
         print(f"val_dice:         {results['dice']:.2f}%")
         print(f"val_iou:          {results['iou']:.2f}%")
         print(f"val_pixel_acc:    {results['pixel_acc']:.2f}%")
@@ -736,6 +855,18 @@ def main():
     if args.recipe:
         print(f"recipe:           {args.recipe}")
 
+    results_status = append_results_row(
+        dataset,
+        task,
+        backbone_name,
+        loss_type,
+        args.recipe,
+        primary_metric,
+        peak_vram_mb,
+    )
+    print(f"results_tsv:      {RESULTS_FILE}")
+    print(f"results_status:   {results_status}")
+
     # Save checkpoint if requested
     if args.save_checkpoint:
         ckpt_config = {
@@ -744,7 +875,7 @@ def main():
             "optimizer": OPTIMIZER, "learning_rate": LEARNING_RATE,
             "loss": loss_type, "recipe": args.recipe,
         }
-        ckpt_name = f"{dataset}_{backbone_name}_{primary_metric:.1f}.pth"
+        ckpt_name = f"{dataset}_{backbone_name}_{format_metric_for_filename(primary_metric)}.pth"
         ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt_name)
         save_checkpoint(model, results, ckpt_config, ckpt_path)
 

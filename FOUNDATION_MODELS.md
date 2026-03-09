@@ -54,7 +54,7 @@ The `MedicalClassifier` in `train.py` automatically:
 2. Downloads the model from HuggingFace Hub
 3. Extracts the vision encoder
 4. Attaches a task-specific classification head
-5. Freezes/unfreezes layers as appropriate
+5. Leaves fine-tuning policy to the training configuration
 
 ### Recipe Example
 ```yaml

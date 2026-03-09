@@ -845,32 +845,47 @@ class MedicalSegmentationDataset(Dataset):
 # Dataloaders (imported by train.py)
 # ---------------------------------------------------------------------------
 
-def make_classification_transforms(dataset_name, train=True):
+def make_classification_transforms(dataset_name, train=True, image_size=None, augmentation_config=None):
     """Build transforms for medical classification."""
     cfg = DATASETS[dataset_name]
-    img_size = cfg["image_size"]
+    img_size = image_size or cfg["image_size"]
+    augmentation_config = augmentation_config or {}
 
     if cfg["in_channels"] == 1:
         mean, std = cfg["mean"], cfg["std"]
     else:
         mean, std = cfg["mean"], cfg["std"]
 
+    horizontal_flip = augmentation_config.get("horizontal_flip", True)
+    vertical_flip = augmentation_config.get("vertical_flip", True)
+    rotation = augmentation_config.get("rotation", 15)
+    use_clahe = augmentation_config.get("clahe", False)
+    use_color_jitter = augmentation_config.get("color_jitter", cfg["in_channels"] == 3)
+    brightness = augmentation_config.get("color_jitter_brightness", 0.1)
+    contrast = augmentation_config.get("color_jitter_contrast", 0.1)
+    use_translation = augmentation_config.get("translate", not augmentation_config)
+
+    transform_list = [T.Resize((img_size, img_size))]
+
     if train:
-        transform_list = [
-            T.Resize((img_size, img_size)),
-            T.RandomHorizontalFlip(),
-            T.RandomVerticalFlip(),
-            T.RandomRotation(15),
-            T.ColorJitter(brightness=0.1, contrast=0.1) if cfg["in_channels"] == 3 else T.RandomAffine(degrees=0, translate=(0.05, 0.05)),
-            T.ToTensor(),
-            T.Normalize(mean, std),
-        ]
-    else:
-        transform_list = [
-            T.Resize((img_size, img_size)),
-            T.ToTensor(),
-            T.Normalize(mean, std),
-        ]
+        if horizontal_flip:
+            transform_list.append(T.RandomHorizontalFlip())
+        if vertical_flip:
+            transform_list.append(T.RandomVerticalFlip())
+        if rotation:
+            transform_list.append(T.RandomRotation(rotation))
+        if cfg["in_channels"] == 3 and use_color_jitter:
+            transform_list.append(T.ColorJitter(brightness=brightness, contrast=contrast))
+        elif cfg["in_channels"] == 1 and use_translation:
+            transform_list.append(T.RandomAffine(degrees=0, translate=(0.05, 0.05)))
+
+    if use_clahe:
+        transform_list.append(T.Lambda(_apply_clahe_pil))
+
+    transform_list.extend([
+        T.ToTensor(),
+        T.Normalize(mean, std),
+    ])
 
     # For grayscale: expand to 3 channels for pretrained models
     if cfg["in_channels"] == 1:
@@ -879,7 +894,7 @@ def make_classification_transforms(dataset_name, train=True):
     return T.Compose(transform_list)
 
 
-def make_dataloader(dataset_name, batch_size, split="train"):
+def make_dataloader(dataset_name, batch_size, split="train", image_size=None, augmentation_config=None):
     """Create a dataloader for the specified dataset and split.
 
     Returns:
@@ -887,9 +902,15 @@ def make_dataloader(dataset_name, batch_size, split="train"):
     """
     cfg = DATASETS[dataset_name]
     is_train = (split == "train")
+    image_size = image_size or cfg["image_size"]
 
     if cfg["task"] in ("classification", "multilabel"):
-        transforms = make_classification_transforms(dataset_name, train=is_train)
+        transforms = make_classification_transforms(
+            dataset_name,
+            train=is_train,
+            image_size=image_size,
+            augmentation_config=augmentation_config,
+        )
         if cfg["task"] == "multilabel":
             dataset = MedicalMultilabelDataset(
                 dataset_name, split=split, transform=transforms
@@ -901,7 +922,7 @@ def make_dataloader(dataset_name, batch_size, split="train"):
     else:
         dataset = MedicalSegmentationDataset(
             dataset_name, split=split,
-            image_size=cfg["image_size"],
+            image_size=image_size,
             augment=is_train,
         )
 
@@ -918,13 +939,19 @@ def make_dataloader(dataset_name, batch_size, split="train"):
     return loader, cfg["num_classes"]
 
 
-def make_infinite_dataloader(dataset_name, batch_size, split="train"):
+def make_infinite_dataloader(dataset_name, batch_size, split="train", image_size=None, augmentation_config=None):
     """Create an infinite dataloader that loops over the dataset.
 
     Yields:
         (images, targets, epoch)
     """
-    loader, num_classes = make_dataloader(dataset_name, batch_size, split)
+    loader, num_classes = make_dataloader(
+        dataset_name,
+        batch_size,
+        split,
+        image_size=image_size,
+        augmentation_config=augmentation_config,
+    )
     epoch = 1
     while True:
         for batch in loader:
@@ -939,8 +966,21 @@ def get_class_weights(dataset_name, device="cuda"):
     split_file = os.path.join(data_dir, "splits.csv")
     df = pd.read_csv(split_file)
     train_df = df[df["split"] == "train"]
+    task = DATASETS[dataset_name]["task"]
 
     num_classes = DATASETS[dataset_name]["num_classes"]
+
+    if task == "multilabel":
+        label_matrix = np.stack([
+            np.array([int(x) for x in str(label_str).split("|")], dtype=np.float32)
+            for label_str in train_df["labels"]
+        ])
+        positives = label_matrix.sum(axis=0)
+        negatives = len(label_matrix) - positives
+        weights = negatives / np.maximum(positives, 1.0)
+        weights = np.clip(weights, 0.5, 20.0)
+        return torch.tensor(weights, dtype=torch.float32, device=device)
+
     counts = train_df["label"].value_counts().sort_index()
 
     # Ensure all classes represented
@@ -962,7 +1002,7 @@ def get_class_weights(dataset_name, device="cuda"):
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate_classification(model, dataset_name, batch_size, device="cuda"):
+def evaluate_classification(model, dataset_name, batch_size, device="cuda", image_size=None, augmentation_config=None):
     """
     Evaluate classification on the validation set.
 
@@ -973,7 +1013,13 @@ def evaluate_classification(model, dataset_name, batch_size, device="cuda"):
         kappa (float): Quadratic weighted Cohen's kappa (0-1)
     """
     cfg = DATASETS[dataset_name]
-    loader, num_classes = make_dataloader(dataset_name, batch_size, split="val")
+    loader, num_classes = make_dataloader(
+        dataset_name,
+        batch_size,
+        split="val",
+        image_size=image_size,
+        augmentation_config=augmentation_config,
+    )
     model.eval()
 
     all_preds = []
@@ -1027,7 +1073,7 @@ def evaluate_classification(model, dataset_name, batch_size, device="cuda"):
 
 
 @torch.no_grad()
-def evaluate_multilabel(model, dataset_name, batch_size, device="cuda"):
+def evaluate_multilabel(model, dataset_name, batch_size, device="cuda", image_size=None, augmentation_config=None):
     """
     Evaluate multi-label classification (e.g., CheXNet/ChestX-ray14).
 
@@ -1036,7 +1082,13 @@ def evaluate_multilabel(model, dataset_name, batch_size, device="cuda"):
         per_class_auc (dict): AUC for each pathology
     """
     cfg = DATASETS[dataset_name]
-    loader, num_classes = make_dataloader(dataset_name, batch_size, split="val")
+    loader, num_classes = make_dataloader(
+        dataset_name,
+        batch_size,
+        split="val",
+        image_size=image_size,
+        augmentation_config=augmentation_config,
+    )
     model.eval()
 
     all_probs = []
@@ -1076,7 +1128,7 @@ def evaluate_multilabel(model, dataset_name, batch_size, device="cuda"):
 
 
 @torch.no_grad()
-def evaluate_segmentation(model, dataset_name, batch_size, device="cuda"):
+def evaluate_segmentation(model, dataset_name, batch_size, device="cuda", image_size=None):
     """
     Evaluate segmentation on the validation set.
 
@@ -1088,7 +1140,12 @@ def evaluate_segmentation(model, dataset_name, batch_size, device="cuda"):
         specificity (float): True negative rate (0-100)
     """
     cfg = DATASETS[dataset_name]
-    loader, num_classes = make_dataloader(dataset_name, batch_size, split="val")
+    loader, num_classes = make_dataloader(
+        dataset_name,
+        batch_size,
+        split="val",
+        image_size=image_size,
+    )
     model.eval()
 
     total_tp = 0
@@ -1155,6 +1212,13 @@ def apply_clahe(image, clip_limit=2.0, grid_size=(8, 8)):
     else:
         clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=grid_size)
         return clahe.apply(image)
+
+
+def _apply_clahe_pil(image):
+    """Torchvision-friendly wrapper around CLAHE preprocessing."""
+    image_np = np.array(image)
+    image_np = apply_clahe(image_np)
+    return Image.fromarray(image_np)
 
 
 # ---------------------------------------------------------------------------
