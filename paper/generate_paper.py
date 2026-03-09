@@ -40,12 +40,22 @@ def escape_latex(text):
     return text
 
 
-def load_results(results_path, dataset_filter=None):
+def load_results(results_path, dataset_filter=None, session_filter=None):
     if not os.path.exists(results_path):
         return pd.DataFrame()
     df = pd.read_csv(results_path, sep="\t")
     if dataset_filter and "dataset" in df.columns:
         df = df[df["dataset"] == dataset_filter].copy()
+    if "session" in df.columns:
+        session_series = df["session"].fillna("").astype(str).str.strip()
+        if session_filter:
+            df = df[session_series == str(session_filter)].copy()
+        else:
+            non_empty = session_series[session_series != ""]
+            if not non_empty.empty:
+                df = df[session_series == str(non_empty.iloc[-1])].copy()
+    elif session_filter:
+        raise ValueError("results.tsv does not contain a 'session' column")
     if "status" in df.columns:
         keep_like = df[df["status"].isin(["keep", "candidate"])]
         if not keep_like.empty:
@@ -594,12 +604,13 @@ def main():
     parser.add_argument("--results", type=str, default=RESULTS_FILE)
     parser.add_argument("--output", type=str, default=None)
     parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--figures-dir", type=str, default=None)
     parser.add_argument("--final-eval", type=str, default=None)
     parser.add_argument("--compile", action="store_true")
     args = parser.parse_args()
 
-    results_df = load_results(args.results, dataset_filter=args.dataset)
+    results_df = load_results(args.results, dataset_filter=args.dataset, session_filter=args.session)
     checkpoint_results, checkpoint_config = {}, {}
     dataset_name = args.dataset or "medical imaging dataset"
     final_eval = load_final_eval(args.final_eval)

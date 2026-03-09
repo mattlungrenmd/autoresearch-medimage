@@ -23,6 +23,7 @@ import copy
 import csv
 import gc
 import math
+import random
 import sys
 import time
 import argparse
@@ -309,9 +310,20 @@ RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results
 RESULTS_HEADER = [
     "timestamp",
     "commit",
+    "session",
     "dataset",
     "recipe",
     "backbone",
+    "optimizer",
+    "loss",
+    "image_size",
+    "batch_size",
+    "learning_rate",
+    "weight_decay",
+    "dropout",
+    "augmentations",
+    "seed",
+    "time_budget_seconds",
     "metric_name",
     "metric",
     "memory_gb",
@@ -323,6 +335,54 @@ RUN_TIME_BUDGET = TIME_BUDGET
 CURRENT_RUN_DATASET = DATASET
 CURRENT_RUN_RECIPE = ""
 CURRENT_RUN_BACKBONE = BACKBONE
+CURRENT_RUN_SESSION = ""
+RUN_SEED = 42
+
+
+def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % (2 ** 32)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def summarize_augmentations():
+    flags = []
+    if AUG_HORIZONTAL_FLIP:
+        flags.append("hflip")
+    if AUG_VERTICAL_FLIP:
+        flags.append("vflip")
+    if AUG_ROTATION_DEGREES:
+        flags.append(f"rot={AUG_ROTATION_DEGREES}")
+    if AUG_COLOR_JITTER:
+        flags.append("color")
+    if AUG_USE_CLAHE:
+        flags.append("clahe")
+    return ",".join(flags) if flags else "none"
+
+
+def current_results_metadata(cfg, loss_type):
+    return {
+        "session": CURRENT_RUN_SESSION or "",
+        "optimizer": OPTIMIZER,
+        "loss": loss_type,
+        "image_size": str(get_image_size(cfg)),
+        "batch_size": str(BATCH_SIZE),
+        "learning_rate": f"{LEARNING_RATE:.8g}",
+        "weight_decay": f"{WEIGHT_DECAY:.8g}",
+        "dropout": f"{DROPOUT:.4f}",
+        "augmentations": summarize_augmentations(),
+        "seed": str(RUN_SEED),
+        "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}",
+    }
 
 # ---------------------------------------------------------------------------
 # Classification Model: CheXNet-style (DenseNet-121 + pretrained)
@@ -1125,6 +1185,9 @@ def build_classification_transforms(cfg, train=True):
 def build_loader(dataset_name, cfg, batch_size, split="train"):
     is_train = split == "train"
     worker_count = resolve_worker_count()
+    generator = torch.Generator()
+    split_offset = {"train": 0, "val": 1, "test": 2}.get(split, 0)
+    generator.manual_seed(RUN_SEED + split_offset)
 
     if cfg["task"] == "classification":
         dataset = MedicalClassificationDataset(
@@ -1156,6 +1219,8 @@ def build_loader(dataset_name, cfg, batch_size, split="train"):
         pin_memory=torch.cuda.is_available(),
         drop_last=is_train and len(dataset) > effective_batch_size,
         persistent_workers=worker_count > 0,
+        generator=generator,
+        worker_init_fn=seed_worker if worker_count > 0 else None,
     )
 
 
@@ -1392,11 +1457,38 @@ def evaluate_segmentation_loader(model, loader, device):
 # ---------------------------------------------------------------------------
 
 def ensure_results_file():
-    if os.path.exists(RESULTS_FILE):
+    if not os.path.exists(RESULTS_FILE):
+        with open(RESULTS_FILE, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=RESULTS_HEADER, delimiter="\t")
+            writer.writeheader()
         return
+
+    with open(RESULTS_FILE, "r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        existing_header = reader.fieldnames or []
+        rows = list(reader)
+
+    if not existing_header:
+        with open(RESULTS_FILE, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=RESULTS_HEADER, delimiter="\t")
+            writer.writeheader()
+        return
+
+    if existing_header == RESULTS_HEADER:
+        return
+
+    migrated_rows = []
+    for row in rows:
+        normalized = {}
+        for field in RESULTS_HEADER:
+            value = row.get(field, "")
+            normalized[field] = "" if value is None else value
+        migrated_rows.append(normalized)
+
     with open(RESULTS_FILE, "w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=RESULTS_HEADER, delimiter="\t")
         writer.writeheader()
+        writer.writerows(migrated_rows)
 
 
 def resolve_git_dir(repo_root):
@@ -1439,9 +1531,21 @@ def read_commit_hash(repo_root):
     return "unknown"
 
 
-def append_results_row(dataset, recipe, backbone, metric_name, metric, memory_gb, status, checkpoint_path, description):
+def append_results_row(
+    dataset,
+    recipe,
+    backbone,
+    metric_name,
+    metric,
+    memory_gb,
+    status,
+    checkpoint_path,
+    description,
+    metadata=None,
+):
     ensure_results_file()
-    row = {
+    row = {field: "" for field in RESULTS_HEADER}
+    row.update({
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "commit": read_commit_hash(os.path.dirname(os.path.abspath(__file__))),
         "dataset": dataset,
@@ -1453,7 +1557,11 @@ def append_results_row(dataset, recipe, backbone, metric_name, metric, memory_gb
         "status": status,
         "checkpoint_path": checkpoint_path or "",
         "description": description,
-    }
+    })
+    if metadata:
+        for key, value in metadata.items():
+            if key in row:
+                row[key] = value
     with open(RESULTS_FILE, "a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=RESULTS_HEADER, delimiter="\t")
         writer.writerow(row)
@@ -1465,6 +1573,8 @@ def build_run_description(dataset_name, cfg, recipe_name, backbone_name, loss_ty
         parts.append(f"recipe={recipe_name}")
     else:
         parts.append(f"dataset={dataset_name}")
+    if CURRENT_RUN_SESSION:
+        parts.append(f"session={CURRENT_RUN_SESSION}")
     parts.extend([backbone_name, OPTIMIZER, loss_type, f"{get_image_size(cfg)}px"])
     if AUG_USE_CLAHE:
         parts.append("clahe")
@@ -1519,7 +1629,7 @@ def primary_metric_for_results(results, cfg):
 
 
 def main():
-    global CURRENT_RUN_DATASET, CURRENT_RUN_RECIPE, CURRENT_RUN_BACKBONE, RUN_TIME_BUDGET
+    global CURRENT_RUN_DATASET, CURRENT_RUN_RECIPE, CURRENT_RUN_BACKBONE, CURRENT_RUN_SESSION, RUN_TIME_BUDGET
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument(
@@ -1539,6 +1649,12 @@ def main():
         default=None,
         help="Optional override for smoke tests. Defaults to the 300s autoresearch budget.",
     )
+    parser.add_argument(
+        "--session",
+        type=str,
+        default=None,
+        help="Optional run-session tag used to isolate a fresh overnight search in results.tsv and downstream artifacts.",
+    )
     parser.add_argument("--list-recipes", action="store_true", help="List available recipes and exit")
     args = parser.parse_args()
 
@@ -1553,6 +1669,7 @@ def main():
     dataset = args.dataset or DATASET
     CURRENT_RUN_DATASET = dataset
     CURRENT_RUN_RECIPE = args.recipe or ""
+    CURRENT_RUN_SESSION = (args.session or "").strip()
     RUN_TIME_BUDGET = float(args.time_budget) if args.time_budget is not None else float(TIME_BUDGET)
     if RUN_TIME_BUDGET <= 0:
         raise ValueError("--time-budget must be positive")
@@ -1563,9 +1680,8 @@ def main():
 
     device = select_device()
     t_start = time.time()
-    torch.manual_seed(42)
+    seed_everything(RUN_SEED)
     if device.type == "cuda":
-        torch.cuda.manual_seed(42)
         torch.set_float32_matmul_precision("high")
     scaler = torch.amp.GradScaler(enabled=device.type == "cuda")
 
@@ -2021,6 +2137,8 @@ def main():
     print(f"num_params_M:     {num_params / 1e6:.1f}")
     print(f"num_epochs:       {epoch}")
     print(f"dataset:          {dataset}")
+    if CURRENT_RUN_SESSION:
+        print(f"session:          {CURRENT_RUN_SESSION}")
     print(f"task:             {task}")
     print(f"backbone:         {backbone_name}")
     if args.recipe:
@@ -2043,6 +2161,8 @@ def main():
             "weight_decay": WEIGHT_DECAY,
             "loss": loss_type,
             "recipe": args.recipe,
+            "session": CURRENT_RUN_SESSION,
+            "seed": RUN_SEED,
             "time_budget_seconds": RUN_TIME_BUDGET,
             "selection_split": "val",
             "image_size": get_image_size(cfg),
@@ -2084,6 +2204,7 @@ def main():
         status="candidate",
         checkpoint_path=checkpoint_path,
         description=build_run_description(dataset, cfg, args.recipe, backbone_name, loss_type),
+        metadata=current_results_metadata(cfg, loss_type),
     )
 
 
@@ -2102,6 +2223,7 @@ if __name__ == "__main__":
                 status="crash",
                 checkpoint_path="",
                 description=f"crash: {type(exc).__name__}: {exc}",
+                metadata={"session": CURRENT_RUN_SESSION or "", "seed": str(RUN_SEED)},
             )
         except Exception:
             pass

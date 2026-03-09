@@ -83,6 +83,7 @@ uv run train.py --list-recipes    # list all recipes
 - **Pretrained U-Net**: segmentation with any timm encoder backbone + attention gates
 - **18 recipes**: from simple baselines to advanced pipelines (distillation,
   foundation models, ordinal regression)
+- **Session-scoped runs**: `--session` isolates overnight experiments with seeded dataloaders
 - **Paper generation**: generate LaTeX manuscripts from checkpoint data and results
 - **Regulatory documents**: generate FDA 510(k), CE/EU MDR, and UKCA planning documents from experiment results
 - **Kaggle auto-detect**: `tools/kaggle_autodetect.py` for new Kaggle datasets
