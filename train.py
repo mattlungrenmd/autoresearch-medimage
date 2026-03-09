@@ -1714,6 +1714,11 @@ def main():
 
     # CLI overrides recipe
     dataset = args.dataset or DATASET
+    if dataset not in DATASETS:
+        print(f"ERROR: Unknown dataset '{dataset}'")
+        print(f"Available: {sorted(DATASETS.keys())}")
+        print(f"\nTo add your own: uv run prepare.py --data /path/to/your/images")
+        sys.exit(1)
     cfg = DATASETS[dataset]
     task = cfg["task"]
     num_classes = cfg["num_classes"]

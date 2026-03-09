@@ -1,21 +1,32 @@
 """
 Data preparation and evaluation for autoresearch-medvision experiments.
-Automates Kaggle dataset download for ophthalmology and radiology tasks.
 
-This file is READ-ONLY for agents. Do not modify.
+Supports two modes:
+  1. Built-in presets — download 7 curated medical imaging datasets from Kaggle
+  2. Bring-your-own-data — auto-detect ANY medical imaging dataset structure
+
+This file is READ-ONLY for agents during experiments. Do not modify.
 
 Usage:
+    # Built-in datasets (Kaggle download)
     python prepare.py --dataset aptos            # Diabetic Retinopathy grading
-    python prepare.py --dataset oct              # Retinal OCT classification
-    python prepare.py --dataset chest_xray       # Chest X-ray pneumonia
+    python prepare.py --dataset chestxray14      # CheXNet multi-label (14 pathologies)
     python prepare.py --dataset brain_mri        # Brain MRI segmentation
-    python prepare.py --dataset pneumothorax     # Chest pneumothorax segmentation
-    python prepare.py --dataset retina_vessel    # Retinal vessel segmentation
-    python prepare.py --dataset all              # Download all datasets
-    python prepare.py --list                     # List available datasets
+    python prepare.py --dataset all              # Download all 7 datasets
+    python prepare.py --list                     # List all available datasets
 
-Requires: ~/.kaggle/kaggle.json with valid API credentials.
+    # Bring your own data (auto-detect)
+    python prepare.py --data /path/to/images                  # Auto-detect everything
+    python prepare.py --data /path --task segmentation        # Override task type
+    python prepare.py --data /path --patient-column PatientID # Patient-level splits
+    python prepare.py --data /path --compute-stats            # Compute mean/std
+
+    # Download from Kaggle + auto-detect
+    python prepare.py --kaggle username/dataset-slug
+
+Requires: ~/.kaggle/kaggle.json with valid API credentials (for Kaggle downloads).
 Datasets are stored in ./data/<dataset_name>/
+Each custom dataset gets a dataset.json manifest for the dynamic registry.
 """
 
 import os
@@ -27,7 +38,10 @@ import shutil
 import zipfile
 import argparse
 import hashlib
+import glob as glob_module
+import re
 from pathlib import Path
+from collections import Counter
 
 import cv2
 import numpy as np
@@ -37,7 +51,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms as T
 from PIL import Image
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, GroupShuffleSplit
 from sklearn.metrics import cohen_kappa_score, roc_auc_score
 
 # ---------------------------------------------------------------------------
@@ -52,10 +66,10 @@ RANDOM_SEED = 42            # reproducible splits
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 # ---------------------------------------------------------------------------
-# Dataset registry
+# Dataset registry — built-in presets (7 demo datasets)
 # ---------------------------------------------------------------------------
 
-DATASETS = {
+BUILTIN_DATASETS = {
     # === OPHTHALMOLOGY ===
     "aptos": {
         "kaggle_slug": "mariaherrerot/aptos2019",
@@ -151,6 +165,935 @@ DATASETS = {
 }
 
 # ---------------------------------------------------------------------------
+# Image file extensions recognized by auto-detection
+# ---------------------------------------------------------------------------
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
+DICOM_EXTENSIONS = {".dcm", ".dicom"}
+
+# ---------------------------------------------------------------------------
+# Dynamic dataset registry — merges built-ins + custom dataset.json files
+# ---------------------------------------------------------------------------
+
+def build_registry():
+    """Build DATASETS by merging BUILTIN_DATASETS with any data/<name>/dataset.json found on disk.
+
+    Custom datasets discovered via dataset.json are added transparently so
+    train.py can access them via ``DATASETS[name]`` without code changes.
+    """
+    registry = dict(BUILTIN_DATASETS)
+
+    if not os.path.isdir(DATA_DIR):
+        return registry
+
+    for entry in sorted(os.listdir(DATA_DIR)):
+        entry_dir = os.path.join(DATA_DIR, entry)
+        manifest = os.path.join(entry_dir, "dataset.json")
+        if not os.path.isfile(manifest):
+            continue
+        try:
+            with open(manifest, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            # Validate required keys
+            name = cfg.get("name", entry)
+            required = ("task", "num_classes")
+            if not all(k in cfg for k in required):
+                print(f"  WARNING: skipping {manifest} — missing keys: "
+                      f"{[k for k in required if k not in cfg]}")
+                continue
+            # Normalize tuples stored as lists
+            for key in ("mean", "std"):
+                if key in cfg and isinstance(cfg[key], list):
+                    cfg[key] = tuple(cfg[key])
+            # Defaults
+            cfg.setdefault("class_names", [f"class_{i}" for i in range(cfg["num_classes"])])
+            cfg.setdefault("image_size", 256 if cfg["task"] == "segmentation" else 224)
+            cfg.setdefault("in_channels", 3)
+            cfg.setdefault("mean", (0.485, 0.456, 0.406) if cfg.get("in_channels", 3) == 3 else (0.485,))
+            cfg.setdefault("std", (0.229, 0.224, 0.225) if cfg.get("in_channels", 3) == 3 else (0.229,))
+            cfg.setdefault("metric", _auto_metric(cfg["task"], cfg["num_classes"]))
+            cfg.setdefault("description", f"Custom dataset: {name}")
+            registry[name] = cfg
+        except Exception as e:
+            print(f"  WARNING: failed to load {manifest}: {e}")
+
+    return registry
+
+
+def _auto_metric(task, num_classes):
+    """Choose a default metric based on task type and class count."""
+    if task == "segmentation":
+        return "dice"
+    elif task == "multilabel":
+        return "auc"
+    elif task == "classification" and num_classes == 2:
+        return "auc"
+    elif task == "ordinal":
+        return "quadratic_kappa"
+    return "accuracy"
+
+
+DATASETS = build_registry()
+
+
+# ---------------------------------------------------------------------------
+# Auto-detection pipeline: bring-your-own-data
+# ---------------------------------------------------------------------------
+
+def scan_directory(data_dir):
+    """Scan a data directory and detect its structure.
+
+    Returns a dict describing what was found: CSV files, image directories,
+    class-folder structures, mask directories, and DICOM files.
+    """
+    result = {
+        "csv_files": [],
+        "image_dirs": [],
+        "image_count": 0,
+        "mask_dirs": [],
+        "class_dirs": [],
+        "dicom_files": [],
+        "has_splits": False,
+        "total_files": 0,
+    }
+
+    for root, dirs, files in os.walk(data_dir):
+        # Detect pre-existing train/val/test splits
+        dir_names_lower = [d.lower() for d in dirs]
+        if "train" in dir_names_lower or "val" in dir_names_lower:
+            result["has_splits"] = True
+
+        # Count images
+        images = [f for f in files if Path(f).suffix.lower() in IMAGE_EXTENSIONS]
+        if images:
+            result["image_dirs"].append({"path": root, "count": len(images)})
+            result["image_count"] += len(images)
+
+        # Detect DICOM
+        dicoms = [f for f in files if Path(f).suffix.lower() in DICOM_EXTENSIONS]
+        if dicoms:
+            result["dicom_files"].extend(
+                os.path.join(root, f) for f in dicoms
+            )
+
+        # Find CSVs
+        csvs = [f for f in files if f.lower().endswith(".csv")]
+        for csv_name in csvs:
+            csv_path = os.path.join(root, csv_name)
+            try:
+                df = pd.read_csv(csv_path, nrows=5)
+                result["csv_files"].append({
+                    "path": csv_path,
+                    "name": csv_name,
+                    "columns": list(df.columns),
+                    "rows": len(pd.read_csv(csv_path)),
+                })
+            except Exception:
+                pass
+
+        # Detect class-structured directories (train/class_a, train/class_b)
+        subdirs = [d for d in dirs if os.path.isdir(os.path.join(root, d))]
+        has_images_in_subdirs = False
+        for d in subdirs:
+            subdir_path = os.path.join(root, d)
+            sub_images = [f for f in os.listdir(subdir_path)
+                         if Path(f).suffix.lower() in IMAGE_EXTENSIONS]
+            if sub_images:
+                has_images_in_subdirs = True
+
+        if has_images_in_subdirs and len(subdirs) >= 2:
+            # Exclude split-level directories (train/val/test/images/masks)
+            if not any(d.lower() in ("train", "test", "val", "validation",
+                                      "images", "masks", "labels", "annotations")
+                       for d in subdirs):
+                result["class_dirs"].append({
+                    "path": root,
+                    "classes": sorted(subdirs),
+                    "num_classes": len(subdirs),
+                })
+
+        # Detect mask directories
+        for d in subdirs:
+            if any(kw in d.lower() for kw in ["mask", "label", "annotation",
+                                                "segmentation", "gt", "ground_truth"]):
+                mask_path = os.path.join(root, d)
+                mask_count = len([f for f in os.listdir(mask_path)
+                                 if Path(f).suffix.lower() in IMAGE_EXTENSIONS])
+                if mask_count > 0:
+                    result["mask_dirs"].append({"path": mask_path, "count": mask_count})
+
+        result["total_files"] += len(files)
+
+    return result
+
+
+def detect_task(scan_result):
+    """Detect the task type from a directory scan result."""
+    has_masks = len(scan_result["mask_dirs"]) > 0
+    has_class_dirs = len(scan_result["class_dirs"]) > 0
+    has_csvs = len(scan_result["csv_files"]) > 0
+
+    # Segmentation: has mask directories
+    if has_masks:
+        return "segmentation"
+
+    # Classification with folder structure
+    if has_class_dirs:
+        return "classification"
+
+    # Check CSVs for multi-label indicators
+    if has_csvs:
+        for csv_info in scan_result["csv_files"]:
+            cols = [c.lower() for c in csv_info["columns"]]
+            # Pipe-separated column names → multilabel
+            if any("|" in str(c) for c in cols):
+                return "multilabel"
+            # Read a sample to check for pipe-separated label values
+            label_cols = [c for c in cols if any(kw in c for kw in
+                         ["label", "target", "class", "diagnosis",
+                          "finding", "category"])]
+            if label_cols:
+                try:
+                    df = pd.read_csv(csv_info["path"], nrows=100)
+                    for col in label_cols:
+                        orig_col = [c for c in df.columns if c.lower() == col][0]
+                        vals = df[orig_col].astype(str)
+                        if vals.str.contains(r"\|").any():
+                            return "multilabel"
+                except Exception:
+                    pass
+                return "classification"
+
+    return "classification"  # default
+
+
+def detect_label_info(scan_result, data_dir):
+    """Detect label columns, class names, and image column from the scan."""
+    info = {
+        "num_classes": 2,
+        "class_names": [],
+        "label_column": None,
+        "image_column": None,
+        "patient_column": None,
+    }
+
+    # From folder structure
+    if scan_result["class_dirs"]:
+        class_info = scan_result["class_dirs"][0]
+        info["num_classes"] = class_info["num_classes"]
+        info["class_names"] = class_info["classes"]
+        return info
+
+    # From CSV
+    if scan_result["csv_files"]:
+        csv_info = scan_result["csv_files"][0]
+        csv_path = csv_info["path"]
+        try:
+            df = pd.read_csv(csv_path, nrows=1000)
+        except Exception:
+            return info
+
+        cols = list(df.columns)
+        cols_lower = [c.lower() for c in cols]
+
+        # Detect image column
+        for pattern in ["image", "file", "path", "filename", "id_code"]:
+            matches = [c for c, cl in zip(cols, cols_lower) if pattern in cl]
+            if matches:
+                info["image_column"] = matches[0]
+                break
+
+        # Detect label column
+        for pattern in ["label", "target", "class", "diagnosis",
+                        "finding", "category", "grade", "level"]:
+            matches = [c for c, cl in zip(cols, cols_lower)
+                       if pattern in cl and "image" not in cl]
+            if matches:
+                info["label_column"] = matches[0]
+                break
+
+        # Detect patient column (for patient-level splitting)
+        for pattern in ["patient_id", "patientid", "patient", "subject_id",
+                        "subject", "case_id", "case"]:
+            matches = [c for c, cl in zip(cols, cols_lower) if cl == pattern]
+            if matches:
+                info["patient_column"] = matches[0]
+                break
+
+        if info["label_column"]:
+            labels = df[info["label_column"]].dropna()
+            unique_labels = sorted(labels.unique(), key=lambda x: str(x))
+            info["num_classes"] = len(unique_labels)
+            info["class_names"] = [str(l) for l in unique_labels][:50]
+
+    return info
+
+
+def detect_channels(data_dir, scan_result):
+    """Detect number of image channels from a sample image."""
+    for img_dir_info in scan_result["image_dirs"]:
+        try:
+            for f in os.listdir(img_dir_info["path"]):
+                if Path(f).suffix.lower() in IMAGE_EXTENSIONS:
+                    img = Image.open(os.path.join(img_dir_info["path"], f))
+                    if img.mode in ("L", "1", "I", "F"):
+                        return 1
+                    return 3
+        except Exception:
+            continue
+    return 3  # default
+
+
+def compute_dataset_statistics(data_dir, scan_result, in_channels=3, max_samples=1000):
+    """Compute per-channel mean and std using Welford's online algorithm.
+
+    Samples up to max_samples images for efficiency.
+    Returns (mean_tuple, std_tuple).
+    """
+    # Collect image paths
+    all_images = []
+    for img_dir_info in scan_result["image_dirs"]:
+        for f in os.listdir(img_dir_info["path"]):
+            if Path(f).suffix.lower() in IMAGE_EXTENSIONS:
+                all_images.append(os.path.join(img_dir_info["path"], f))
+
+    if not all_images:
+        if in_channels == 1:
+            return (0.485,), (0.229,)
+        return (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+
+    # Sample
+    rng = np.random.RandomState(RANDOM_SEED)
+    sample = rng.choice(all_images, size=min(max_samples, len(all_images)), replace=False)
+
+    # Welford's online algorithm per channel
+    n = 0
+    channel_sum = np.zeros(in_channels, dtype=np.float64)
+    channel_sq_sum = np.zeros(in_channels, dtype=np.float64)
+
+    for img_path in sample:
+        try:
+            img = Image.open(img_path)
+            if in_channels == 1:
+                img = img.convert("L")
+                arr = np.array(img, dtype=np.float64).ravel() / 255.0
+                channel_sum[0] += arr.mean()
+                channel_sq_sum[0] += (arr ** 2).mean()
+            else:
+                img = img.convert("RGB")
+                arr = np.array(img, dtype=np.float64) / 255.0
+                for c in range(3):
+                    channel_sum[c] += arr[:, :, c].mean()
+                    channel_sq_sum[c] += (arr[:, :, c] ** 2).mean()
+            n += 1
+        except Exception:
+            continue
+
+    if n == 0:
+        if in_channels == 1:
+            return (0.485,), (0.229,)
+        return (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+
+    mean = channel_sum / n
+    std = np.sqrt(channel_sq_sum / n - mean ** 2)
+    std = np.maximum(std, 1e-6)  # avoid zero std
+
+    return tuple(float(m) for m in mean), tuple(float(s) for s in std)
+
+
+def _detect_patient_ids_from_paths(image_paths):
+    """Try to extract patient IDs from image file paths.
+
+    Heuristic: look for common patterns like 'patient_001/scan.png' or
+    'TCGA_AB_1234_slice01.png' where the first few path components or
+    filename prefix encodes the patient.
+    """
+    # Strategy 1: directory-based (images grouped by patient folders)
+    parents = [os.path.basename(os.path.dirname(p)) for p in image_paths]
+    unique_parents = set(parents)
+    # If there are many fewer parents than images, they're probably patients
+    if 1 < len(unique_parents) < len(image_paths) * 0.5:
+        return parents
+
+    # Strategy 2: filename prefix before last underscore or hyphen
+    # e.g., "patient001_slice01.png" -> "patient001"
+    stems = [Path(p).stem for p in image_paths]
+    prefixes = []
+    for s in stems:
+        # Try to split on last underscore/hyphen
+        for sep in ["_", "-"]:
+            parts = s.rsplit(sep, 1)
+            if len(parts) == 2:
+                prefixes.append(parts[0])
+                break
+        else:
+            prefixes.append(s)
+
+    unique_prefixes = set(prefixes)
+    if 1 < len(unique_prefixes) < len(image_paths) * 0.5:
+        return prefixes
+
+    return None  # Cannot determine patient IDs
+
+
+def _patient_level_split(df, patient_col=None, val_ratio=VAL_RATIO, seed=RANDOM_SEED):
+    """Split a DataFrame using patient-level grouping to prevent leakage.
+
+    If patient_col is provided, use that column for grouping.
+    Otherwise, try to auto-detect from image paths.
+    """
+    if patient_col and patient_col in df.columns:
+        groups = df[patient_col].values
+    elif "image_path" in df.columns:
+        groups = _detect_patient_ids_from_paths(df["image_path"].tolist())
+        if groups is None:
+            # Fall back to stratified split
+            return _stratified_split(df, val_ratio, seed)
+        groups = np.array(groups)
+    else:
+        return _stratified_split(df, val_ratio, seed)
+
+    # Use GroupShuffleSplit for patient-level splitting
+    gss = GroupShuffleSplit(n_splits=1, test_size=val_ratio, random_state=seed)
+    stratify_col = "label" if "label" in df.columns else None
+
+    try:
+        train_idx, val_idx = next(gss.split(df, groups=groups))
+        df = df.copy()
+        df["split"] = "train"
+        df.loc[df.index[val_idx], "split"] = "val"
+        n_patients_train = len(set(groups[train_idx]))
+        n_patients_val = len(set(groups[val_idx]))
+        print(f"  Patient-level split: {n_patients_train} patients train, "
+              f"{n_patients_val} patients val")
+        return df
+    except Exception:
+        return _stratified_split(df, val_ratio, seed)
+
+
+def _stratified_split(df, val_ratio=VAL_RATIO, seed=RANDOM_SEED):
+    """Standard stratified train/val split."""
+    df = df.copy()
+    if "label" in df.columns and df["label"].nunique() >= 2:
+        skf = StratifiedKFold(
+            n_splits=max(2, int(1 / val_ratio)),
+            shuffle=True,
+            random_state=seed,
+        )
+        df["split"] = "train"
+        _, val_idx = next(skf.split(df, df["label"]))
+        df.loc[df.index[val_idx], "split"] = "val"
+    else:
+        n = len(df)
+        indices = np.random.RandomState(seed).permutation(n)
+        val_count = max(1, int(n * val_ratio))
+        df["split"] = "train"
+        df.loc[df.index[indices[:val_count]], "split"] = "val"
+    return df
+
+
+def _prepare_generic_classification(data_dir, scan_result, label_info, split_file,
+                                     patient_column=None):
+    """Generic classification split from folder-of-folders structure."""
+    rows = []
+
+    if scan_result["has_splits"]:
+        # Honor existing train/val/test splits
+        for split_name in ["train", "val", "validation", "test"]:
+            split_dir = _find_dir(data_dir, split_name)
+            if split_dir is None:
+                continue
+            mapped_split = "val" if split_name in ("test", "val", "validation") else "train"
+            class_dirs = sorted([d for d in os.listdir(split_dir)
+                                if os.path.isdir(os.path.join(split_dir, d))])
+            for cls_idx, cls_name in enumerate(class_dirs):
+                cls_dir = os.path.join(split_dir, cls_name)
+                for img in os.listdir(cls_dir):
+                    if Path(img).suffix.lower() in IMAGE_EXTENSIONS:
+                        rows.append({
+                            "image_path": os.path.join(cls_dir, img),
+                            "label": cls_idx,
+                            "split": mapped_split,
+                        })
+
+        if rows:
+            df = pd.DataFrame(rows)
+            df.to_csv(split_file, index=False)
+            n_train = (df["split"] == "train").sum()
+            n_val = (df["split"] == "val").sum()
+            print(f"  Classification (pre-split): {n_train} train, {n_val} val, "
+                  f"{len(set(df['label']))} classes")
+            return
+
+    # No pre-existing splits: single class-folder structure
+    if scan_result["class_dirs"]:
+        class_info = scan_result["class_dirs"][0]
+        for cls_idx, cls_name in enumerate(class_info["classes"]):
+            cls_dir = os.path.join(class_info["path"], cls_name)
+            if not os.path.isdir(cls_dir):
+                continue
+            for img in os.listdir(cls_dir):
+                if Path(img).suffix.lower() in IMAGE_EXTENSIONS:
+                    rows.append({
+                        "image_path": os.path.join(cls_dir, img),
+                        "label": cls_idx,
+                    })
+
+    if not rows:
+        print("  WARNING: No images found for classification")
+        return
+
+    df = pd.DataFrame(rows)
+    df = _patient_level_split(df, patient_column)
+    df.to_csv(split_file, index=False)
+    n_train = (df["split"] == "train").sum()
+    n_val = (df["split"] == "val").sum()
+    print(f"  Classification: {n_train} train, {n_val} val, "
+          f"{len(set(df['label']))} classes")
+
+
+def _prepare_generic_csv(data_dir, scan_result, label_info, task, split_file,
+                          patient_column=None):
+    """Generic split from CSV + images directory."""
+    csv_info = scan_result["csv_files"][0]
+    df = pd.read_csv(csv_info["path"])
+
+    img_col = label_info.get("image_column")
+    label_col = label_info.get("label_column")
+
+    if not img_col or not label_col:
+        print(f"  WARNING: Could not detect image/label columns in {csv_info['name']}")
+        print(f"  Columns found: {csv_info['columns']}")
+        print("  Hint: use --config with image_column and label_column overrides")
+        return
+
+    # Find image directory
+    img_dir = None
+    for candidate in ["images", "train_images", "train", "imgs"]:
+        img_dir = _find_dir(data_dir, candidate)
+        if img_dir:
+            break
+    if img_dir is None:
+        # Use directory with most images
+        if scan_result["image_dirs"]:
+            img_dir = max(scan_result["image_dirs"], key=lambda x: x["count"])["path"]
+        else:
+            img_dir = data_dir
+
+    rows = []
+    for _, row in df.iterrows():
+        img_name = str(row[img_col])
+        label = row[label_col]
+
+        if task == "multilabel":
+            # Multi-label: pipe-separated values
+            label_str = str(label)
+            rows.append({"image_path": "", "labels": label_str, "label": 0})
+        else:
+            # Classification: integer or string label
+            if isinstance(label, str):
+                # Map string labels to indices
+                all_labels = sorted(df[label_col].unique(), key=str)
+                label = all_labels.index(label)
+            rows.append({"image_path": "", "label": int(label)})
+
+        # Resolve image path
+        resolved = None
+        for ext in ["", ".png", ".jpg", ".jpeg", ".tif", ".tiff"]:
+            candidate = os.path.join(img_dir, img_name + ext)
+            if os.path.exists(candidate):
+                resolved = candidate
+                break
+        if resolved is None:
+            matches = list(Path(img_dir).glob(f"{img_name}.*"))
+            if matches:
+                resolved = str(matches[0])
+        if resolved:
+            rows[-1]["image_path"] = resolved
+        else:
+            rows.pop()  # Remove row if image not found
+
+    if not rows:
+        print("  WARNING: No images matched from CSV")
+        return
+
+    result_df = pd.DataFrame(rows)
+
+    # Add patient column if present in source CSV
+    patient_col = patient_column or label_info.get("patient_column")
+    if patient_col and patient_col in df.columns:
+        # Re-read to get patient column, matching indices
+        matched = df[df[img_col].apply(
+            lambda x: any(os.path.exists(os.path.join(img_dir, str(x) + ext))
+                         for ext in ["", ".png", ".jpg", ".jpeg"])
+        )].reset_index(drop=True)
+        if len(matched) == len(result_df) and patient_col in matched.columns:
+            result_df[patient_col] = matched[patient_col].values
+
+    result_df = _patient_level_split(result_df, patient_col)
+    result_df.to_csv(split_file, index=False)
+    n_train = (result_df["split"] == "train").sum()
+    n_val = (result_df["split"] == "val").sum()
+    print(f"  CSV-based ({task}): {n_train} train, {n_val} val")
+
+
+def _prepare_generic_segmentation(data_dir, scan_result, split_file,
+                                    patient_column=None):
+    """Generic segmentation split from images + masks directories."""
+    rows = []
+
+    # Find image and mask directories
+    img_dir = None
+    mask_dir = None
+
+    # Look for paired image/mask directories
+    for img_name in ["images", "imgs", "image", "train"]:
+        candidate = _find_dir(data_dir, img_name)
+        if candidate:
+            img_dir = candidate
+            break
+
+    for mask_name in ["masks", "mask", "labels", "annotations", "gt",
+                      "ground_truth", "segmentation"]:
+        candidate = _find_dir(data_dir, mask_name)
+        if candidate:
+            mask_dir = candidate
+            break
+
+    if img_dir and mask_dir:
+        img_files = sorted([f for f in os.listdir(img_dir)
+                           if Path(f).suffix.lower() in IMAGE_EXTENSIONS])
+        mask_files = sorted([f for f in os.listdir(mask_dir)
+                            if Path(f).suffix.lower() in IMAGE_EXTENSIONS])
+
+        for img_name in img_files:
+            stem = Path(img_name).stem
+            mask_match = None
+            for mf in mask_files:
+                if stem in mf or Path(mf).stem in stem:
+                    mask_match = mf
+                    break
+            if mask_match is None and len(img_files) == len(mask_files):
+                idx = img_files.index(img_name)
+                mask_match = mask_files[idx]
+            if mask_match:
+                rows.append({
+                    "image_path": os.path.join(img_dir, img_name),
+                    "mask_path": os.path.join(mask_dir, mask_match),
+                    "label": 0,
+                })
+
+    # Fallback: walk directory for co-located image/mask pairs
+    if not rows:
+        for root, dirs, files in os.walk(data_dir):
+            images = sorted([f for f in files
+                            if Path(f).suffix.lower() in IMAGE_EXTENSIONS
+                            and "mask" not in f.lower() and "label" not in f.lower()])
+            masks = sorted([f for f in files
+                           if Path(f).suffix.lower() in IMAGE_EXTENSIONS
+                           and ("mask" in f.lower() or "label" in f.lower())])
+            for img, msk in zip(images, masks):
+                rows.append({
+                    "image_path": os.path.join(root, img),
+                    "mask_path": os.path.join(root, msk),
+                    "label": 0,
+                })
+
+    if not rows:
+        print("  WARNING: No image/mask pairs found for segmentation")
+        return
+
+    df = pd.DataFrame(rows)
+    df = _patient_level_split(df, patient_column)
+    df.to_csv(split_file, index=False)
+    n_train = (df["split"] == "train").sum()
+    n_val = (df["split"] == "val").sum()
+    print(f"  Segmentation: {n_train} train, {n_val} val")
+
+
+def _convert_dicoms(data_dir):
+    """Auto-convert any DICOM files in data_dir to PNG.
+
+    Returns path to the converted PNG directory (or original data_dir if
+    no DICOM files found).
+    """
+    dcm_files = []
+    for root, dirs, files in os.walk(data_dir):
+        for f in files:
+            if Path(f).suffix.lower() in DICOM_EXTENSIONS:
+                dcm_files.append(os.path.join(root, f))
+
+    if not dcm_files:
+        return data_dir
+
+    print(f"  Found {len(dcm_files)} DICOM files — converting to PNG...")
+    png_dir = os.path.join(data_dir, "converted_png")
+    os.makedirs(png_dir, exist_ok=True)
+
+    try:
+        import pydicom
+    except ImportError:
+        print("  WARNING: pydicom not installed. Install with: uv pip install pydicom")
+        print("  Skipping DICOM conversion.")
+        return data_dir
+
+    patient_ids = {}
+    for i, dcm_path in enumerate(dcm_files):
+        try:
+            ds = pydicom.dcmread(dcm_path)
+            pixel_array = ds.pixel_array.astype(np.float64)
+
+            slope = getattr(ds, "RescaleSlope", 1)
+            intercept = getattr(ds, "RescaleIntercept", 0)
+            pixel_array = pixel_array * slope + intercept
+
+            # Windowing
+            if hasattr(ds, "WindowCenter") and hasattr(ds, "WindowWidth"):
+                wc = ds.WindowCenter
+                ww = ds.WindowWidth
+                if isinstance(wc, (list, pydicom.multival.MultiValue)):
+                    wc = wc[0]
+                if isinstance(ww, (list, pydicom.multival.MultiValue)):
+                    ww = ww[0]
+                wc, ww = float(wc), float(ww)
+            else:
+                wc = (pixel_array.max() + pixel_array.min()) / 2
+                ww = max(pixel_array.max() - pixel_array.min(), 1)
+
+            lower = wc - ww / 2
+            upper = wc + ww / 2
+            img_array = np.clip(pixel_array, lower, upper)
+            img_array = ((img_array - lower) / max(upper - lower, 1) * 255).astype(np.uint8)
+
+            if getattr(ds, "PhotometricInterpretation", "") == "MONOCHROME1":
+                img_array = 255 - img_array
+
+            png_name = Path(dcm_path).stem + ".png"
+            png_path = os.path.join(png_dir, png_name)
+            Image.fromarray(img_array).save(png_path)
+
+            pid = getattr(ds, "PatientID", "unknown")
+            patient_ids[png_name] = pid
+
+            if (i + 1) % 100 == 0:
+                print(f"    Converted {i+1}/{len(dcm_files)} DICOM files...")
+        except Exception as e:
+            if i < 3:
+                print(f"    WARNING: skipping {Path(dcm_path).name}: {e}")
+
+    # Save patient mapping if detected
+    if patient_ids:
+        mapping_path = os.path.join(data_dir, "dicom_patient_map.json")
+        with open(mapping_path, "w") as f:
+            json.dump(patient_ids, f, indent=2)
+
+    print(f"  Converted {len(os.listdir(png_dir))} DICOM → PNG in {png_dir}")
+    return data_dir
+
+
+def prepare_custom_dataset(data_path, task_override=None, config_overrides=None,
+                            patient_column=None, compute_stats=False):
+    """Auto-detect and prepare ANY medical imaging dataset.
+
+    This is the main entry point for bring-your-own-data. It:
+    1. Detects DICOM files and converts them to PNG
+    2. Scans directory structure to detect task type
+    3. Infers metadata (num_classes, class_names, channels)
+    4. Creates train/val splits (patient-level if possible)
+    5. Writes dataset.json manifest for the dynamic registry
+
+    Args:
+        data_path: Path to the dataset directory
+        task_override: Optional task type override ('classification', 'multilabel', 'segmentation')
+        config_overrides: Optional dict or YAML path with overrides
+        patient_column: CSV column name for patient-level splitting
+        compute_stats: Whether to compute per-channel mean/std (default: use ImageNet stats)
+
+    Returns:
+        Dataset name (str) for use with train.py
+    """
+    data_path = os.path.abspath(data_path)
+
+    # Determine dataset name from path
+    ds_name = os.path.basename(data_path).replace("-", "_").replace(" ", "_").lower()
+    if not ds_name:
+        ds_name = "custom_dataset"
+
+    # Ensure data lives under DATA_DIR for consistent access
+    target_dir = os.path.join(DATA_DIR, ds_name)
+    if os.path.abspath(data_path) != os.path.abspath(target_dir):
+        if not os.path.isdir(target_dir):
+            # Symlink or copy into data/
+            os.makedirs(DATA_DIR, exist_ok=True)
+            try:
+                os.symlink(os.path.abspath(data_path), target_dir)
+                print(f"  Linked {data_path} → {target_dir}")
+            except (OSError, NotImplementedError):
+                # Windows or no symlink support: just use original path
+                target_dir = data_path
+    else:
+        pass  # Already under data/
+
+    data_dir = target_dir
+
+    print(f"\n{'='*60}")
+    print(f"Auto-detecting dataset: {ds_name}")
+    print(f"{'='*60}")
+    print(f"Path: {data_path}\n")
+
+    # Step 1: DICOM conversion
+    _convert_dicoms(data_dir)
+
+    # Step 2: Scan directory structure
+    print("Scanning directory structure...")
+    scan_result = scan_directory(data_dir)
+    print(f"  Images found:  {scan_result['image_count']:,}")
+    print(f"  CSV files:     {len(scan_result['csv_files'])}")
+    print(f"  Class dirs:    {len(scan_result['class_dirs'])}")
+    print(f"  Mask dirs:     {len(scan_result['mask_dirs'])}")
+    print(f"  DICOM files:   {len(scan_result['dicom_files'])}")
+    print(f"  Pre-split:     {'yes' if scan_result['has_splits'] else 'no'}")
+
+    # Step 3: Detect task
+    task = task_override or detect_task(scan_result)
+    print(f"\nDetected task: {task}")
+
+    # Step 4: Detect label info
+    label_info = detect_label_info(scan_result, data_dir)
+    print(f"Num classes:   {label_info['num_classes']}")
+    if label_info["class_names"]:
+        names_str = ", ".join(label_info["class_names"][:10])
+        if len(label_info["class_names"]) > 10:
+            names_str += f"... (+{len(label_info['class_names'])-10} more)"
+        print(f"Classes:       {names_str}")
+    if label_info.get("label_column"):
+        print(f"Label column:  {label_info['label_column']}")
+    if label_info.get("image_column"):
+        print(f"Image column:  {label_info['image_column']}")
+    if label_info.get("patient_column"):
+        print(f"Patient col:   {label_info['patient_column']}")
+
+    # Step 5: Detect channels
+    in_channels = detect_channels(data_dir, scan_result)
+    print(f"Channels:      {in_channels}")
+
+    # Step 6: Compute or use default statistics
+    if compute_stats:
+        print("\nComputing dataset statistics...")
+        mean, std = compute_dataset_statistics(data_dir, scan_result, in_channels)
+        print(f"  Mean: {mean}")
+        print(f"  Std:  {std}")
+    else:
+        mean = (0.485,) if in_channels == 1 else (0.485, 0.456, 0.406)
+        std = (0.229,) if in_channels == 1 else (0.229, 0.224, 0.225)
+
+    # Apply config overrides
+    if config_overrides:
+        if isinstance(config_overrides, str):
+            # Load from YAML file
+            try:
+                import yaml
+                with open(config_overrides) as f:
+                    config_overrides = yaml.safe_load(f)
+            except ImportError:
+                # Parse simple key=value from file
+                config_overrides = {}
+                print("  WARNING: PyYAML not installed, ignoring config file")
+
+        if isinstance(config_overrides, dict):
+            task = config_overrides.get("task", task)
+            label_info["num_classes"] = config_overrides.get("num_classes", label_info["num_classes"])
+            if "class_names" in config_overrides:
+                label_info["class_names"] = config_overrides["class_names"]
+            if "image_column" in config_overrides:
+                label_info["image_column"] = config_overrides["image_column"]
+            if "label_column" in config_overrides:
+                label_info["label_column"] = config_overrides["label_column"]
+            if "patient_column" in config_overrides:
+                patient_column = config_overrides["patient_column"]
+            if "metric" in config_overrides:
+                pass  # handled below
+            in_channels = config_overrides.get("in_channels", in_channels)
+
+    # Step 7: Create splits
+    split_file = os.path.join(data_dir, "splits.csv")
+    if os.path.exists(split_file):
+        print(f"\n  splits.csv already exists — skipping split creation")
+        print(f"  Delete {split_file} to regenerate")
+    else:
+        print(f"\nCreating train/val splits...")
+        patient_col = patient_column or label_info.get("patient_column")
+
+        if task == "segmentation":
+            _prepare_generic_segmentation(data_dir, scan_result, split_file,
+                                          patient_column=patient_col)
+        elif scan_result["class_dirs"] or scan_result["has_splits"]:
+            _prepare_generic_classification(data_dir, scan_result, label_info,
+                                             split_file, patient_column=patient_col)
+        elif scan_result["csv_files"]:
+            _prepare_generic_csv(data_dir, scan_result, label_info, task,
+                                  split_file, patient_column=patient_col)
+        else:
+            print("  WARNING: Could not determine how to create splits.")
+            print("  Provide a CSV with image paths and labels, or organize images into class folders.")
+            return None
+
+    # Step 8: Write dataset.json manifest
+    metric = _auto_metric(task, label_info["num_classes"])
+    if config_overrides and isinstance(config_overrides, dict):
+        metric = config_overrides.get("metric", metric)
+
+    manifest = {
+        "name": ds_name,
+        "task": task,
+        "num_classes": label_info["num_classes"],
+        "class_names": label_info["class_names"],
+        "image_size": 256 if task == "segmentation" else 224,
+        "in_channels": in_channels,
+        "mean": list(mean),
+        "std": list(std),
+        "metric": metric,
+        "description": f"Auto-detected from {data_path}",
+    }
+
+    manifest_path = os.path.join(data_dir, "dataset.json")
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    print(f"\nWrote {manifest_path}")
+    print(f"\n{'='*60}")
+    print(f"Ready! Run: uv run train.py --dataset {ds_name}")
+    print(f"{'='*60}\n")
+
+    # Refresh the global registry
+    global DATASETS
+    DATASETS = build_registry()
+
+    return ds_name
+
+
+def download_kaggle_auto(slug):
+    """Download a Kaggle dataset and auto-detect its structure.
+
+    Combines Kaggle download with the auto-detection pipeline.
+    """
+    check_kaggle_credentials()
+
+    # Determine destination
+    ds_name = slug.replace("/", "_").replace("-", "_").lower()
+    dest_dir = os.path.join(DATA_DIR, ds_name)
+
+    if not os.path.exists(os.path.join(dest_dir, ".download_complete")):
+        print(f"Downloading from Kaggle: {slug}")
+        download_kaggle_dataset(slug, dest_dir)
+    else:
+        print(f"Already downloaded: {slug}")
+
+    # Now auto-detect
+    return prepare_custom_dataset(dest_dir)
+
+
+# ---------------------------------------------------------------------------
 # Kaggle download automation
 # ---------------------------------------------------------------------------
 
@@ -229,6 +1172,7 @@ def _prepare_splits(dataset_name, dest_dir):
 
     print(f"  Creating train/val splits for {dataset_name}...")
 
+    # Built-in datasets have specialized preparation functions
     if dataset_name == "aptos":
         _prepare_aptos(dest_dir, split_file)
     elif dataset_name == "oct":
@@ -243,6 +1187,9 @@ def _prepare_splits(dataset_name, dest_dir):
         _prepare_retina_vessel(dest_dir, split_file)
     elif dataset_name == "pneumothorax":
         _prepare_pneumothorax(dest_dir, split_file)
+    else:
+        # Custom dataset: use generic auto-detection
+        prepare_custom_dataset(dest_dir)
 
 
 def _find_file(base_dir, filename):
@@ -682,7 +1629,12 @@ def _prepare_pneumothorax(dest_dir, split_file):
 def get_dataset_config(dataset_name):
     """Return dataset configuration dict."""
     if dataset_name not in DATASETS:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Choose from {list(DATASETS.keys())}")
+        available = sorted(DATASETS.keys())
+        raise ValueError(
+            f"Unknown dataset: {dataset_name}\n"
+            f"Available: {available}\n"
+            f"To add your own: uv run prepare.py --data /path/to/your/images"
+        )
     return DATASETS[dataset_name]
 
 
@@ -1226,42 +2178,145 @@ def _apply_clahe_pil(image):
 # ---------------------------------------------------------------------------
 
 def list_datasets():
-    """Print all available datasets."""
+    """Print all available datasets (built-in + custom)."""
+    # Refresh registry to pick up any new dataset.json files
+    global DATASETS
+    DATASETS = build_registry()
+
+    builtin_names = set(BUILTIN_DATASETS.keys())
+    custom_names = set(DATASETS.keys()) - builtin_names
+
     print("\nAvailable medical imaging datasets:\n")
-    print(f"{'Name':<16} {'Task':<16} {'Classes':<8} {'Metric':<16} Description")
-    print("-" * 100)
-    for name, cfg in DATASETS.items():
-        print(f"{name:<16} {cfg['task']:<16} {cfg['num_classes']:<8} {cfg['metric']:<16} {cfg['description']}")
+    print(f"{'Name':<20} {'Task':<16} {'Classes':<8} {'Metric':<16} Description")
+    print("-" * 110)
+
+    # Built-in datasets
+    if builtin_names:
+        print("\n  Built-in presets:")
+        for name in sorted(builtin_names):
+            cfg = DATASETS[name]
+            print(f"  {name:<18} {cfg['task']:<16} {cfg['num_classes']:<8} "
+                  f"{cfg['metric']:<16} {cfg['description']}")
+
+    # Custom datasets
+    if custom_names:
+        print("\n  Custom datasets:")
+        for name in sorted(custom_names):
+            cfg = DATASETS[name]
+            print(f"  {name:<18} {cfg['task']:<16} {cfg['num_classes']:<8} "
+                  f"{cfg['metric']:<16} {cfg['description']}")
+
+    print(f"\nTotal: {len(DATASETS)} datasets ({len(builtin_names)} built-in, "
+          f"{len(custom_names)} custom)")
     print()
-    print("Ophthalmology: aptos, oct, retina_vessel")
-    print("Radiology:     chestxray14 (CheXNet), chest_xray, brain_mri, pneumothorax")
+    print("To add a custom dataset:")
+    print("  uv run prepare.py --data /path/to/your/images")
+    print("  uv run prepare.py --kaggle username/dataset-slug")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Prepare medical imaging datasets from Kaggle")
+    parser = argparse.ArgumentParser(
+        description="Prepare medical imaging datasets — built-in presets or bring-your-own-data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Built-in datasets (download from Kaggle)
+  uv run prepare.py --dataset chestxray14
+  uv run prepare.py --dataset all
+
+  # Bring your own data (auto-detect everything)
+  uv run prepare.py --data /path/to/my/images
+  uv run prepare.py --data /path --task segmentation
+  uv run prepare.py --data /path --patient-column PatientID
+  uv run prepare.py --data /path --compute-stats
+
+  # Download from Kaggle + auto-detect
+  uv run prepare.py --kaggle username/dataset-slug
+
+  # List all available datasets
+  uv run prepare.py --list
+""",
+    )
     parser.add_argument(
         "--dataset", type=str, default=None,
-        choices=list(DATASETS.keys()) + ["all"],
-        help="Dataset to download",
+        help="Built-in dataset to download (use --list to see options)",
     )
-    parser.add_argument("--list", action="store_true", help="List available datasets")
+    parser.add_argument("--list", action="store_true",
+                        help="List all available datasets (built-in + custom)")
+
+    # Bring-your-own-data
+    parser.add_argument("--data", type=str, default=None,
+                        help="Path to your own dataset directory (auto-detect)")
+    parser.add_argument("--kaggle", type=str, default=None,
+                        help="Kaggle dataset slug to download and auto-detect")
+    parser.add_argument("--task", type=str, default=None,
+                        choices=["classification", "multilabel", "segmentation"],
+                        help="Override auto-detected task type")
+    parser.add_argument("--config", type=str, default=None,
+                        help="YAML config file with dataset overrides")
+    parser.add_argument("--patient-column", type=str, default=None,
+                        help="CSV column name for patient-level splitting")
+    parser.add_argument("--compute-stats", action="store_true",
+                        help="Compute dataset-specific mean/std (default: ImageNet stats)")
+
     args = parser.parse_args()
 
-    if args.list or args.dataset is None:
+    # --- List mode ---
+    if args.list:
         list_datasets()
-        if args.dataset is None:
-            print("\nUsage: python prepare.py --dataset <name>")
         sys.exit(0)
 
-    print(f"Data directory: {DATA_DIR}")
-    print()
+    # --- Bring-your-own-data mode ---
+    if args.data:
+        if not os.path.isdir(args.data):
+            print(f"ERROR: directory not found: {args.data}")
+            sys.exit(1)
+        ds_name = prepare_custom_dataset(
+            args.data,
+            task_override=args.task,
+            config_overrides=args.config,
+            patient_column=args.patient_column,
+            compute_stats=args.compute_stats,
+        )
+        if ds_name:
+            print("Done! Ready to train.")
+        sys.exit(0)
 
-    if args.dataset == "all":
-        for ds_name in DATASETS:
-            download_dataset(ds_name)
-            print()
-    else:
-        download_dataset(args.dataset)
+    # --- Kaggle auto-detect mode ---
+    if args.kaggle:
+        ds_name = download_kaggle_auto(args.kaggle)
+        if ds_name:
+            print("Done! Ready to train.")
+        sys.exit(0)
 
-    print()
-    print("Done! Ready to train.")
+    # --- Built-in dataset mode ---
+    if args.dataset:
+        # Validate against known datasets
+        valid_choices = list(DATASETS.keys()) + ["all"]
+        if args.dataset not in valid_choices:
+            print(f"Unknown dataset: {args.dataset}")
+            print(f"Available: {sorted(DATASETS.keys())}")
+            print("\nOr bring your own data: uv run prepare.py --data /path/to/images")
+            sys.exit(1)
+
+        print(f"Data directory: {DATA_DIR}")
+        print()
+
+        if args.dataset == "all":
+            for ds_name in BUILTIN_DATASETS:
+                download_dataset(ds_name)
+                print()
+        else:
+            download_dataset(args.dataset)
+
+        print()
+        print("Done! Ready to train.")
+        sys.exit(0)
+
+    # --- No arguments: show help ---
+    list_datasets()
+    print("\nUsage:")
+    print("  uv run prepare.py --dataset <name>     # Download built-in dataset")
+    print("  uv run prepare.py --data /path          # Bring your own data")
+    print("  uv run prepare.py --kaggle slug          # Download from Kaggle + auto-detect")
+    print("  uv run prepare.py --list                 # List all datasets")
