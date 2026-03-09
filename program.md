@@ -9,9 +9,10 @@ Before starting experiments, work with the user to:
 
 1. validate or prepare the dataset with `uv run prepare.py --dataset <name>`
 2. use a dedicated run branch if git workflows are available
-3. establish the baseline first
-4. keep experiment output in `run.log`
-5. leave `results.tsv` untracked
+3. choose a fresh session tag for the run
+4. establish the session baseline first
+5. keep experiment output in `run.log`
+6. leave `results.tsv` untracked
 
 ## Experiment Loop
 
@@ -21,16 +22,19 @@ The canonical loop is:
 
 1. inspect the current branch state and the most recent results
 2. modify `train.py`
-3. run `uv run train.py > run.log 2>&1`
+3. run `uv run train.py --session <tag> > run.log 2>&1`
 4. read the metric summary from `run.log`
 5. check the appended row in `results.tsv`
-6. mark the row with `uv run python tools/mark_result.py --status keep|discard`
+6. mark the row with `uv run python tools/mark_result.py --session <tag> --status keep|discard`
 7. keep or discard the idea externally, then continue
 
-For multi-hour sessions, do not rely on vague instructions like "keep going"
-or "continue until interrupted" alone. Use an explicit absolute local deadline
-and tell the agent not to send a final summary before that deadline unless it
-hits a real blocker.
+For multi-hour sessions:
+- use a fresh session tag so the run starts from a clean inner-loop baseline
+- treat experiment 1 in that session as the only starting baseline
+- do not use literature numbers for keep/discard decisions
+- do not rely on vague instructions like "keep going" or "continue until interrupted" alone
+- prefer a concrete stop condition such as "50 completed experiments after the session baseline"
+- tell the agent not to send a final summary before that stop condition unless it hits a real blocker
 
 ## Boundaries
 

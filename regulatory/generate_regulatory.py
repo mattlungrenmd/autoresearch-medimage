@@ -28,12 +28,22 @@ OUTPUT_DIR = os.path.join(REGULATORY_DIR, "output")
 RESULTS_FILE = os.path.join(os.path.dirname(REGULATORY_DIR), "results.tsv")
 
 
-def load_best_result(results_path, dataset_filter=None):
+def load_best_result(results_path, dataset_filter=None, session_filter=None):
     if not results_path or not os.path.exists(results_path):
         return {}
     df = pd.read_csv(results_path, sep="\t")
     if dataset_filter and "dataset" in df.columns:
         df = df[df["dataset"].astype(str) == str(dataset_filter)]
+    if "session" in df.columns:
+        session_series = df["session"].fillna("").astype(str).str.strip()
+        if session_filter:
+            df = df[session_series == str(session_filter)]
+        else:
+            non_empty = session_series[session_series != ""]
+            if not non_empty.empty:
+                df = df[session_series == str(non_empty.iloc[-1])]
+    elif session_filter:
+        raise ValueError("results.tsv does not contain a 'session' column")
     if "status" in df.columns:
         keep_like = df[df["status"].isin(["keep", "candidate"])]
         if not keep_like.empty:
@@ -432,11 +442,12 @@ def main():
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument("--metric", type=str, default=None)
     parser.add_argument("--best-metric", type=str, default=None)
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--results", type=str, default=RESULTS_FILE)
     parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR)
     args = parser.parse_args()
 
-    best_row = load_best_result(args.results, dataset_filter=args.dataset)
+    best_row = load_best_result(args.results, dataset_filter=args.dataset, session_filter=args.session)
     ckpt_config, ckpt_results = {}, {}
     if best_row:
         ckpt_config, ckpt_results = load_checkpoint_config(best_row)

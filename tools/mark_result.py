@@ -15,12 +15,16 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_RESULTS = os.path.join(REPO_DIR, "results.tsv")
 
 
-def pick_row(df, dataset=None, recipe=None, row_index=None):
+def pick_row(df, dataset=None, recipe=None, session=None, row_index=None):
     view = df.copy()
     if dataset:
         view = view[view["dataset"].astype(str) == str(dataset)]
     if recipe:
         view = view[view["recipe"].astype(str) == str(recipe)]
+    if session:
+        if "session" not in view.columns:
+            raise ValueError("results.tsv does not contain a 'session' column")
+        view = view[view["session"].fillna("").astype(str) == str(session)]
     if view.empty:
         raise ValueError("No matching rows found in results.tsv")
 
@@ -38,6 +42,7 @@ def main():
     parser.add_argument("--status", type=str, required=True, choices=["keep", "discard", "candidate"], help="New status")
     parser.add_argument("--dataset", type=str, default=None, help="Optional dataset filter before selecting the row")
     parser.add_argument("--recipe", type=str, default=None, help="Optional recipe filter before selecting the row")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter before selecting the row")
     parser.add_argument("--row", type=int, default=None, help="0-based row within the filtered view; defaults to the latest row")
     parser.add_argument("--append-note", type=str, default=None, help="Optional note appended to the description")
     args = parser.parse_args()
@@ -51,7 +56,7 @@ def main():
     if "status" not in df.columns:
         raise ValueError("results.tsv must contain a 'status' column")
 
-    idx = pick_row(df, dataset=args.dataset, recipe=args.recipe, row_index=args.row)
+    idx = pick_row(df, dataset=args.dataset, recipe=args.recipe, session=args.session, row_index=args.row)
     df.at[idx, "status"] = args.status
 
     if args.append_note:
@@ -66,6 +71,8 @@ def main():
     row = df.loc[idx]
     print("Updated row:")
     print(f"  dataset: {row.get('dataset', '')}")
+    if "session" in row:
+        print(f"  session: {row.get('session', '')}")
     print(f"  recipe: {row.get('recipe', '')}")
     print(f"  backbone: {row.get('backbone', '')}")
     print(f"  metric: {row.get('metric_name', 'metric')}={row.get('metric', '')}")

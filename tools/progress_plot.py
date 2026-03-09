@@ -82,6 +82,30 @@ def choose_dataset(df, explicit_dataset=None):
     return filtered, latest_dataset
 
 
+def choose_session(df, explicit_session=None):
+    if "session" not in df.columns:
+        if explicit_session:
+            raise ValueError("results.tsv does not contain a 'session' column")
+        return df.copy(), None
+
+    session_series = df["session"].fillna("").astype(str).str.strip()
+    if explicit_session:
+        filtered = df[session_series == str(explicit_session)].copy()
+        if filtered.empty:
+            raise ValueError(f"No rows found for session '{explicit_session}'")
+        return filtered, explicit_session
+
+    non_empty = session_series[session_series != ""]
+    if non_empty.empty:
+        return df.copy(), None
+
+    latest_session = str(non_empty.iloc[-1])
+    if non_empty.nunique() > 1:
+        print(f"Multiple sessions found in results.tsv. Defaulting to latest session: {latest_session}")
+    filtered = df[session_series == latest_session].copy()
+    return filtered, latest_session
+
+
 def choose_metric_name(df, explicit_metric=None):
     if explicit_metric:
         filtered = df[df["metric_name"].astype(str) == str(explicit_metric)].copy()
@@ -117,7 +141,7 @@ def compute_running_best(frontier_df, direction):
     return frontier_df["metric"].cummax()
 
 
-def make_plot(df, dataset_name, metric_name, direction, output_path):
+def make_plot(df, dataset_name, metric_name, direction, output_path, session_name=None):
     if df.empty:
         raise ValueError("No rows available to plot")
 
@@ -232,10 +256,10 @@ def make_plot(df, dataset_name, metric_name, direction, output_path):
     better_text = "lower is better" if direction == "lower" else "higher is better"
     ax.set_xlabel("Experiment #", fontsize=12)
     ax.set_ylabel(f"{metric_name} ({better_text})", fontsize=12)
-    ax.set_title(
-        f"Autoresearch Progress: {total_experiments} Experiments, {kept_count} {kept_label}\n{dataset_name}",
-        fontsize=16,
-    )
+    title = f"Autoresearch Progress: {total_experiments} Experiments, {kept_count} {kept_label}\n{dataset_name}"
+    if session_name:
+        title = f"{title} | session={session_name}"
+    ax.set_title(title, fontsize=16)
     ax.legend(loc="best", fontsize=10)
     ax.grid(True, alpha=0.2)
 
@@ -255,6 +279,7 @@ def main():
     parser.add_argument("--results", type=str, default=DEFAULT_RESULTS, help="Path to results.tsv")
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output PNG path")
     parser.add_argument("--dataset", type=str, default=None, help="Optional dataset filter")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--metric-name", type=str, default=None, help="Optional metric filter")
     parser.add_argument(
         "--direction",
@@ -275,7 +300,12 @@ def main():
     if "dataset" not in df.columns or "metric" not in df.columns:
         raise ValueError("results.tsv must include at least 'dataset' and 'metric' columns")
 
-    df, dataset_name = choose_dataset(df, args.dataset)
+    if args.session:
+        df, session_name = choose_session(df, args.session)
+        df, dataset_name = choose_dataset(df, args.dataset)
+    else:
+        df, dataset_name = choose_dataset(df, args.dataset)
+        df, session_name = choose_session(df, None)
     df, metric_name = choose_metric_name(df, args.metric_name)
 
     direction = args.direction
@@ -284,10 +314,12 @@ def main():
 
     output_path = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    make_plot(df, dataset_name, metric_name, direction, output_path)
+    make_plot(df, dataset_name, metric_name, direction, output_path, session_name=session_name)
 
     print(f"Saved progress chart to: {output_path}")
     print(f"Dataset: {dataset_name}")
+    if session_name:
+        print(f"Session: {session_name}")
     print(f"Metric: {metric_name}")
     print(f"Direction: {direction}")
 

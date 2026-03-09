@@ -20,7 +20,7 @@ REPO_DIR = PAPER_DIR.parent
 if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
-from tools.progress_plot import choose_dataset, choose_metric_name, infer_direction, make_plot
+from tools.progress_plot import choose_dataset, choose_metric_name, choose_session, infer_direction, make_plot
 
 RESULTS_FILE = REPO_DIR / "results.tsv"
 BENCHMARK_FILES = {
@@ -40,11 +40,12 @@ HEADLINE_CLASSES = [
 ]
 
 
-def load_results(results_path, dataset_name):
+def load_results(results_path, dataset_name, session_name=None):
     df = pd.read_csv(results_path, sep="\t")
     df, _ = choose_dataset(df, explicit_dataset=dataset_name)
+    df, active_session = choose_session(df, explicit_session=session_name)
     df, metric_name = choose_metric_name(df)
-    return df, metric_name
+    return df, metric_name, active_session
 
 
 def load_best_checkpoint(results_df):
@@ -263,20 +264,21 @@ def main():
     parser.add_argument("--results", type=str, default=str(RESULTS_FILE), help="Path to results.tsv")
     parser.add_argument("--dataset", type=str, required=True, help="Dataset to visualize")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory for generated figure files")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--final-eval", type=str, default=None, help="Optional held-out final evaluation payload (.pt)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir or (PAPER_DIR / "generated" / f"{args.dataset}_figures"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results_df, metric_name = load_results(args.results, args.dataset)
+    results_df, metric_name, active_session = load_results(args.results, args.dataset, session_name=args.session)
     best_row, checkpoint_results, checkpoint_config = load_best_checkpoint(results_df)
     final_eval = load_final_eval(args.final_eval)
     published_rows, per_pathology_rows = benchmark_tables(args.dataset)
 
     direction = infer_direction(metric_name)
     progress_output = output_dir / "progress.png"
-    make_plot(results_df, args.dataset, metric_name, direction, str(progress_output))
+    make_plot(results_df, args.dataset, metric_name, direction, str(progress_output), session_name=active_session)
 
     generated = [str(progress_output)]
 

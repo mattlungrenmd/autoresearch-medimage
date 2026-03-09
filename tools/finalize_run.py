@@ -19,9 +19,13 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_RESULTS = os.path.join(REPO_DIR, "results.tsv")
 
 
-def select_rows(df, dataset=None):
+def select_rows(df, dataset=None, session=None):
     if dataset:
         df = df[df["dataset"].astype(str) == str(dataset)].copy()
+    if session:
+        if "session" not in df.columns:
+            raise ValueError("results.tsv does not contain a 'session' column")
+        df = df[df["session"].fillna("").astype(str) == str(session)].copy()
     if df.empty:
         raise ValueError("No matching rows found in results.tsv")
 
@@ -38,12 +42,33 @@ def select_rows(df, dataset=None):
     return df
 
 
-def infer_dataset(df, explicit_dataset=None):
+def infer_dataset(df, explicit_dataset=None, explicit_session=None):
+    if explicit_session:
+        if "session" not in df.columns:
+            raise ValueError("results.tsv does not contain a 'session' column")
+        session_df = df[df["session"].fillna("").astype(str) == str(explicit_session)].copy()
+        if session_df.empty:
+            raise ValueError(f"No rows found for session '{explicit_session}'")
+        df = session_df
     if explicit_dataset:
         return explicit_dataset
     if "dataset" not in df.columns:
         return "run"
     return str(df.iloc[-1]["dataset"])
+
+
+def infer_session(df, explicit_session=None, dataset=None):
+    if explicit_session:
+        return explicit_session
+    if dataset and "dataset" in df.columns:
+        df = df[df["dataset"].astype(str) == str(dataset)].copy()
+    if "session" not in df.columns:
+        return None
+    session_series = df["session"].fillna("").astype(str).str.strip()
+    non_empty = session_series[session_series != ""]
+    if non_empty.empty:
+        return None
+    return str(non_empty.iloc[-1])
 
 
 def dataset_has_split(dataset_name, split_name):
@@ -73,6 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description="Regenerate end-of-run artifacts from results.tsv")
     parser.add_argument("--results", type=str, default=DEFAULT_RESULTS, help="Path to results.tsv")
     parser.add_argument("--dataset", type=str, default=None, help="Optional dataset filter")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--progress-output", type=str, default=None, help="Optional progress PNG path")
     parser.add_argument("--paper-output", type=str, default=None, help="Optional paper .tex output path")
     parser.add_argument("--reg-output-dir", type=str, default=None, help="Optional regulatory output directory")
@@ -83,8 +109,9 @@ def main():
         raise FileNotFoundError(f"results.tsv not found at: {args.results}")
 
     df = pd.read_csv(args.results, sep="\t")
-    dataset_name = infer_dataset(df, args.dataset)
-    selected = select_rows(df, dataset=dataset_name)
+    session_name = infer_session(df, explicit_session=args.session, dataset=args.dataset)
+    dataset_name = infer_dataset(df, explicit_dataset=args.dataset, explicit_session=session_name)
+    selected = select_rows(df, dataset=dataset_name, session=session_name)
     winner = best_row(selected)
 
     progress_output = os.path.abspath(args.progress_output or os.path.join(REPO_DIR, "progress.png"))
@@ -102,10 +129,13 @@ def main():
         [
             python_exe,
             os.path.join(REPO_DIR, "tools", "progress_plot.py"),
+            "--results",
+            os.path.abspath(args.results),
             "--dataset",
             dataset_name,
             "--output",
             progress_output,
+            *(["--session", session_name] if session_name else []),
         ],
         REPO_DIR,
     )
@@ -130,13 +160,16 @@ def main():
 
     run_command(
         [
-            python_exe,
-            os.path.join(REPO_DIR, "paper", "generate_figures.py"),
-            "--dataset",
-            dataset_name,
-            "--output-dir",
-            figures_dir,
-            *([] if not final_eval_output else ["--final-eval", final_eval_output]),
+                python_exe,
+                os.path.join(REPO_DIR, "paper", "generate_figures.py"),
+                "--results",
+                os.path.abspath(args.results),
+                "--dataset",
+                dataset_name,
+                "--output-dir",
+                figures_dir,
+                *(["--session", session_name] if session_name else []),
+                *([] if not final_eval_output else ["--final-eval", final_eval_output]),
         ],
         REPO_DIR,
     )
@@ -144,12 +177,15 @@ def main():
     paper_cmd = [
         python_exe,
         os.path.join(REPO_DIR, "paper", "generate_paper.py"),
+        "--results",
+        os.path.abspath(args.results),
         "--dataset",
         dataset_name,
         "--output",
         paper_output,
         "--figures-dir",
         figures_dir,
+        *(["--session", session_name] if session_name else []),
         *([] if not final_eval_output else ["--final-eval", final_eval_output]),
     ]
     if args.compile_paper:
@@ -160,16 +196,21 @@ def main():
         [
             python_exe,
             os.path.join(REPO_DIR, "regulatory", "generate_regulatory.py"),
+            "--results",
+            os.path.abspath(args.results),
             "--dataset",
             dataset_name,
             "--output-dir",
             reg_output_dir,
+            *(["--session", session_name] if session_name else []),
         ],
         REPO_DIR,
     )
 
     print("Finalized run artifacts:")
     print(f"  dataset: {dataset_name}")
+    if session_name:
+        print(f"  session: {session_name}")
     print(f"  best metric: {winner.get('metric_name', 'metric')}={winner.get('metric', '')}")
     print(f"  status basis: {'keep' if 'status' in selected.columns and (selected['status'] == 'keep').any() else 'candidate'}")
     print(f"  checkpoint: {winner.get('checkpoint_path', '')}")
