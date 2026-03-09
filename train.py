@@ -170,10 +170,41 @@ CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check
 # Classification Model: CheXNet-style (DenseNet-121 + pretrained)
 # ---------------------------------------------------------------------------
 
+class HuggingFaceVisionEncoder(nn.Module):
+    """Wrapper for HuggingFace vision models used as feature extractors."""
+
+    def __init__(self, model_name, pretrained=True):
+        super().__init__()
+        from transformers import AutoModel, AutoConfig
+
+        config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+        if pretrained:
+            self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        else:
+            self.model = AutoModel.from_config(config, trust_remote_code=True)
+
+        # Determine feature dimension from config
+        self.num_features = getattr(config, "hidden_size",
+                            getattr(config, "projection_dim",
+                            getattr(config, "embed_dim", 768)))
+
+    def forward(self, x):
+        outputs = self.model(pixel_values=x)
+        # Handle different model output formats
+        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            return outputs.pooler_output
+        elif hasattr(outputs, "last_hidden_state"):
+            return outputs.last_hidden_state[:, 0]  # CLS token
+        else:
+            return outputs[0][:, 0] if len(outputs[0].shape) == 3 else outputs[0]
+
+
 class MedicalClassifier(nn.Module):
     """Pretrained backbone + classification head.
     Default: DenseNet-121 (CheXNet architecture).
     Supports any torchvision or timm model: densenet*, resnet*, efficientnet*, convnext*, vit_*, etc.
+    Also supports HuggingFace models with "hf:" prefix (e.g., "hf:microsoft/BiomedCLIP-*").
+    See FOUNDATION_MODELS.md for medical-specific backbone recommendations.
     """
 
     def __init__(self, num_classes, backbone="densenet121", pretrained=True,
@@ -181,7 +212,13 @@ class MedicalClassifier(nn.Module):
         super().__init__()
         self.multilabel = multilabel
 
-        if backbone.startswith("densenet"):
+        if backbone.startswith("hf:"):
+            # HuggingFace model (BiomedCLIP, RETFound, RAD-DINO, etc.)
+            hf_name = backbone[3:]  # strip "hf:" prefix
+            print(f"Loading HuggingFace model: {hf_name}")
+            self.encoder = HuggingFaceVisionEncoder(hf_name, pretrained=pretrained)
+            num_features = self.encoder.num_features
+        elif backbone.startswith("densenet"):
             self.encoder = getattr(models, backbone)(
                 weights="IMAGENET1K_V1" if pretrained else None,
             )

@@ -17,6 +17,13 @@ dependencies = [
     "timm>=1.0.0",
 ]
 
+[project.optional-dependencies]
+foundation = [
+    "transformers>=4.40.0",
+    "huggingface_hub>=0.23.0",
+    "safetensors>=0.4.0",
+]
+
 [tool.uv]
 find-links = [
     "https://download.pytorch.org/whl/cu124",
