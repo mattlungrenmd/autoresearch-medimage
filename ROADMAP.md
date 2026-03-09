@@ -15,7 +15,7 @@ Status: current release
 - advanced training features: EMA, CutMix, MixUp, LLRD, TTA, SWA, knowledge distillation
 - Kaggle dataset auto-detection (`tools/kaggle_autodetect.py`)
 - paper tracker for monitoring new publications (`tools/paper_tracker.py`)
-- experimental paper and regulatory scaffold generators
+- paper and regulatory document generators (real first drafts from experiment data)
 - CheXNet as the documented hello-world, not the only supported workflow
 
 ## v1.1 — Extended Benchmarks and Export
@@ -39,8 +39,8 @@ Status: planned
 | HuggingFace model upload | Model card generation + checkpoint push to Hub |
 | Automated arXiv pipeline | End-to-end paper generation from run artifacts |
 | Multi-GPU / distributed | DDP wrapper for parallel training |
-| Stronger paper generation | Better evidence tracking and figure pipelines |
-| Safer regulatory outputs | Clearer evidence-gap tracking |
+| Richer paper generation | Multi-experiment comparison tables, auto-figure selection |
+| Regulatory evidence tracking | Automated evidence-gap closure from run artifacts |
 
 ## v3.0 — MONAI Backend
 

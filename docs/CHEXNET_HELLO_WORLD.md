@@ -10,8 +10,8 @@ the end-to-end demo that proves the repo can:
 - log results to `results.tsv`
 - save a checkpoint
 - separate inner-loop model selection from final held-out reporting
-- generate a draft paper scaffold
-- generate regulatory planning scaffolds
+- generate a draft paper from run results
+- generate regulatory planning documents
 
 That makes it the right example to reference when promoting the repo publicly.
 
@@ -51,7 +51,7 @@ Regenerate the end-of-run artifacts, including the held-out `test` evaluation:
 uv run python tools/finalize_run.py --dataset chestxray14
 ```
 
-Generate the experimental paper scaffold from the resulting run ledger:
+Generate the paper from the run results and checkpoint data:
 
 ```bash
 uv run paper/generate_paper.py --dataset chestxray14 --output paper/generated/chexnet_hello_world.tex
@@ -69,7 +69,7 @@ Generate the progress plot for the overnight or multi-experiment run:
 uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
 ```
 
-Generate the experimental regulatory scaffolds:
+Generate the regulatory planning documents:
 
 ```bash
 uv run regulatory/generate_regulatory.py --dataset chestxray14 --output-dir regulatory/generated/chexnet_hello_world
@@ -87,8 +87,8 @@ When promoting the repo, the strongest story is:
 
 ## Important Positioning
 
-- The paper generator output is a draft scaffold, not a submission-ready paper.
-- The regulatory outputs are planning scaffolds, not FDA, CE, or UKCA submission packs.
+- The paper generator produces a real draft from experiment data, but requires human review before submission.
+- The regulatory outputs are real planning documents built from actual results, but require review by qualified professionals before any submission.
 - Be explicit that public v1 is optimized for 2D workflows.
 - Pair the CheXNet hello-world with a bring-your-own-data example in the README.
 - The stricter held-out `test` evaluation path is a benchmark/demo refinement, not a ChestXNet-only hardcode in the core training loop.

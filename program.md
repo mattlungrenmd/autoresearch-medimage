@@ -38,7 +38,7 @@ hits a real blocker.
 - `train.py` is the only experiment surface
 - built-in recipes are baselines and examples
 - custom datasets are first-class through the dataset contract under `data/<dataset>/`
-- paper and regulatory generators are downstream experimental artifacts, not the loop itself
+- paper and regulatory generators produce real first drafts from experiment data, run after the loop
 - `tools/finalize_run.py` can regenerate the end-of-run artifacts after an overnight session
 
 ## Goal

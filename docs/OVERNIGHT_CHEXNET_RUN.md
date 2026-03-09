@@ -10,8 +10,8 @@ Start from the current CheXNet hello-world baseline, let the agent iterate on
 
 - an updated `results.tsv`
 - a `progress.png` plot
-- an updated paper scaffold with a held-out `test` result
-- updated regulatory planning scaffolds
+- an updated paper generated from results with a held-out `test` result
+- updated regulatory planning documents
 
 ## Preconditions
 

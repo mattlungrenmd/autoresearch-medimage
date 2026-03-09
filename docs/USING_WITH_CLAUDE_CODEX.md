@@ -49,7 +49,7 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 - "Read the repo, validate my dataset contract, then run a baseline."
 - "Use the current best run as the baseline and improve mean AUC without changing `prepare.py`."
-- "Generate a draft paper scaffold and regulatory planning scaffolds from the best checkpoint."
+- "Generate a draft paper and regulatory planning documents from the best checkpoint."
 
 ## What The Repo Does Well Today
 
@@ -60,6 +60,4 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 ## What To Treat As Experimental
 
-- paper generation
-- regulatory scaffolds
 - foundation-model recipes for external HuggingFace checkpoints

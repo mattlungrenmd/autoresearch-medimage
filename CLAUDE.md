@@ -12,8 +12,8 @@ The core contract is intentionally small:
 - `results.tsv` is the untracked experiment ledger
 
 Public v1 is scoped to 2D classification, 2D multilabel classification, and
-binary segmentation. Paper/regulatory outputs are experimental artifacts, not
-the main product claim.
+binary segmentation. Paper and regulatory generators produce real first drafts
+from experiment data, but are not the main product claim.
 
 ## Commands
 

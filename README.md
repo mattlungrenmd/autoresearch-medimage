@@ -47,7 +47,7 @@ uv run python tools/finalize_run.py --dataset chestxray14
 ```
 
 See [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the full
-walkthrough, including paper and regulatory scaffold generation.
+walkthrough, including paper and regulatory document generation.
 
 ### Smoke test (no GPU, no download)
 
@@ -83,8 +83,8 @@ uv run train.py --list-recipes    # list all recipes
 - **Pretrained U-Net**: segmentation with any timm encoder backbone + attention gates
 - **18 recipes**: from simple baselines to advanced pipelines (distillation,
   foundation models, ordinal regression)
-- **Paper scaffold**: generate LaTeX manuscripts from run artifacts
-- **Regulatory scaffold**: experimental FDA/CE/UKCA planning documents
+- **Paper generation**: generate LaTeX manuscripts from checkpoint data and results
+- **Regulatory documents**: generate FDA 510(k), CE/EU MDR, and UKCA planning documents from experiment results
 - **Kaggle auto-detect**: `tools/kaggle_autodetect.py` for new Kaggle datasets
 - **Paper tracker**: `tools/paper_tracker.py` to monitor new publications
 
@@ -103,7 +103,7 @@ See [program.md](program.md) and
 
 See [ROADMAP.md](ROADMAP.md) for the full plan. Key upcoming milestones:
 
-- **v1.1**: MedMNIST integration (18 benchmarks), ONNX export
+- **v1.1**: ONNX export, extended benchmarks
 - **v2.0**: HuggingFace model upload, multi-GPU, automated arXiv pipeline
 - **v3.0**: MONAI backend for DICOM/NIfTI and 3D volume training
 
