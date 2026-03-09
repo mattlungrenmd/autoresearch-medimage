@@ -1,0 +1,47 @@
+# Identifying Medical Diagnoses and Treatable Diseases by Image-Based Deep Learning
+# Kermany et al., 2018 — Cell, 172(5), 1122-1131
+#
+# OCT classification: CNV, DME, Drusen, Normal
+# Original results: AUC 99.9%, accuracy 96.6%
+
+paper:
+  title: "Identifying Medical Diagnoses and Treatable Diseases by Image-Based Deep Learning"
+  authors: "Kermany, Goldbaum, et al."
+  year: 2018
+  doi: "10.1016/j.cell.2018.02.010"
+  dataset: "Kermany OCT (84,495 images)"
+  reported_metric: "Accuracy 96.6%, AUC 99.9%"
+
+dataset: oct
+task: classification
+
+model:
+  backbone: resnet50
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 32
+  optimizer: adam
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: cross_entropy
+  class_weights: false
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 10
+  color_jitter: false
+
+notes: |
+  The Kermany 2018 paper used transfer learning with InceptionV3 on retinal OCT
+  images for 4-class classification (CNV, DME, Drusen, Normal). Modern
+  reproductions achieve similar or better results with ResNet-50 or EfficientNet.
+  The dataset is well-balanced and relatively "easy" — most models achieve 95%+
+  accuracy. The challenge is reaching 99%+ which requires careful augmentation
+  and larger backbones.

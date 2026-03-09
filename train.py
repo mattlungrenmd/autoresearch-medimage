@@ -6,10 +6,11 @@ Default configuration reproduces CheXNet (Rajpurkar et al., 2017):
 
 Usage:
     uv run train.py                                    # CheXNet on ChestX-ray14 (default)
-    uv run train.py --dataset aptos                    # DR grading
-    uv run train.py --dataset chest_xray               # Pneumonia binary
+    uv run train.py --recipe chexnet                   # Load recipe config
+    uv run train.py --recipe aptos_winner              # Kaggle-winning DR approach
+    uv run train.py --dataset aptos                    # DR grading (manual config)
     uv run train.py --dataset brain_mri                # Brain tumor segmentation
-    uv run train.py --dataset oct                      # Retinal OCT classification
+    uv run train.py --save-checkpoint                  # Save best model
 """
 
 import os
@@ -18,6 +19,8 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 import gc
 import time
 import argparse
+import json
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -31,6 +34,101 @@ from prepare import (
     evaluate_classification, evaluate_multilabel, evaluate_segmentation,
     get_class_weights,
 )
+
+# ---------------------------------------------------------------------------
+# Recipe loader — load configs from recipes/*.yaml
+# ---------------------------------------------------------------------------
+
+def load_recipe(recipe_name):
+    """Load a recipe YAML file and return config dict."""
+    try:
+        import yaml
+    except ImportError:
+        yaml = None
+
+    recipe_dir = Path(__file__).parent / "recipes"
+    recipe_path = recipe_dir / f"{recipe_name}.yaml"
+
+    if not recipe_path.exists():
+        available = [f.stem for f in recipe_dir.glob("*.yaml")]
+        print(f"Recipe '{recipe_name}' not found.")
+        print(f"Available recipes: {', '.join(sorted(available))}")
+        exit(1)
+
+    if yaml is not None:
+        with open(recipe_path) as f:
+            return yaml.safe_load(f)
+    else:
+        # Minimal YAML parser for simple key-value configs (no pyyaml dependency)
+        config = {}
+        with open(recipe_path) as f:
+            content = f.read()
+        # Simple parser: extract key fields we care about
+        import re
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("#") or not line or line.startswith("-") or line.startswith("|"):
+                continue
+            if ":" in line:
+                key, _, val = line.partition(":")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if val.lower() == "true":
+                    val = True
+                elif val.lower() == "false":
+                    val = False
+                elif val.replace(".", "").replace("-", "").isdigit():
+                    val = float(val) if "." in val else int(val)
+                if key and val != "":
+                    config[key] = val
+        return config
+
+
+def apply_recipe(recipe):
+    """Apply recipe config to global hyperparameters. Returns overridden values."""
+    global DATASET, BACKBONE, PRETRAINED, DROPOUT, BATCH_SIZE, LEARNING_RATE
+    global OPTIMIZER, WEIGHT_DECAY, WARMUP_RATIO, WARMDOWN_RATIO
+    global USE_CLASS_WEIGHTS, LABEL_SMOOTHING, LOSS_TYPE, FOCAL_GAMMA
+    global SEG_BATCH_SIZE, SEG_BASE_CHANNELS, IMAGE_SIZE_OVERRIDE
+
+    if "dataset" in recipe:
+        DATASET = recipe["dataset"]
+
+    model = recipe.get("model", {})
+    if isinstance(model, dict):
+        BACKBONE = model.get("backbone", BACKBONE)
+        PRETRAINED = model.get("pretrained", PRETRAINED)
+        DROPOUT = model.get("dropout", DROPOUT)
+        if "base_channels" in model:
+            SEG_BASE_CHANNELS = model["base_channels"]
+
+    training = recipe.get("training", {})
+    if isinstance(training, dict):
+        BATCH_SIZE = training.get("batch_size", BATCH_SIZE)
+        LEARNING_RATE = training.get("learning_rate", LEARNING_RATE)
+        OPTIMIZER = training.get("optimizer", OPTIMIZER)
+        WEIGHT_DECAY = training.get("weight_decay", WEIGHT_DECAY)
+        WARMUP_RATIO = training.get("warmup_ratio", WARMUP_RATIO)
+        WARMDOWN_RATIO = training.get("warmdown_ratio", WARMDOWN_RATIO)
+        LABEL_SMOOTHING = training.get("label_smoothing", LABEL_SMOOTHING)
+
+    loss = recipe.get("loss", {})
+    if isinstance(loss, dict):
+        LOSS_TYPE = loss.get("type", LOSS_TYPE)
+        FOCAL_GAMMA = loss.get("focal_gamma", FOCAL_GAMMA)
+        USE_CLASS_WEIGHTS = loss.get("class_weights", USE_CLASS_WEIGHTS)
+
+    IMAGE_SIZE_OVERRIDE = recipe.get("image_size", None)
+
+    paper = recipe.get("paper", {})
+    if isinstance(paper, dict) and paper:
+        print(f"Recipe: {paper.get('title', recipe.get('dataset', 'unknown'))}")
+        if "reported_metric" in paper:
+            print(f"Published result: {paper['reported_metric']}")
+        if "arxiv" in paper:
+            print(f"Paper: https://arxiv.org/abs/{paper['arxiv']}")
+        print()
+
 
 # ---------------------------------------------------------------------------
 # Hyperparameters (edit these directly, no CLI flags needed)
@@ -55,10 +153,18 @@ WARMDOWN_RATIO = 0.3          # fraction of time budget for cosine decay
 # Loss
 USE_CLASS_WEIGHTS = True      # handle class imbalance
 LABEL_SMOOTHING = 0.0         # label smoothing for classification
+LOSS_TYPE = "auto"            # "auto", "bce", "cross_entropy", "focal", "dice_bce"
+FOCAL_GAMMA = 2.0             # gamma for focal loss
 
 # Segmentation-specific
 SEG_BATCH_SIZE = 8            # batch size for segmentation (larger images)
 SEG_BASE_CHANNELS = 64        # U-Net base channels
+
+# Image size override (None = use dataset default)
+IMAGE_SIZE_OVERRIDE = None
+
+# Checkpointing
+CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
 
 # ---------------------------------------------------------------------------
 # Classification Model: CheXNet-style (DenseNet-121 + pretrained)
@@ -67,7 +173,7 @@ SEG_BASE_CHANNELS = 64        # U-Net base channels
 class MedicalClassifier(nn.Module):
     """Pretrained backbone + classification head.
     Default: DenseNet-121 (CheXNet architecture).
-    Supports: densenet121, densenet169, densenet201, resnet50, efficientnet_b0-b4.
+    Supports any torchvision or timm model: densenet*, resnet*, efficientnet*, convnext*, vit_*, etc.
     """
 
     def __init__(self, num_classes, backbone="densenet121", pretrained=True,
@@ -76,7 +182,6 @@ class MedicalClassifier(nn.Module):
         self.multilabel = multilabel
 
         if backbone.startswith("densenet"):
-            # DenseNet family (CheXNet default)
             self.encoder = getattr(models, backbone)(
                 weights="IMAGENET1K_V1" if pretrained else None,
             )
@@ -88,14 +193,8 @@ class MedicalClassifier(nn.Module):
             )
             num_features = self.encoder.fc.in_features
             self.encoder.fc = nn.Identity()
-        elif backbone.startswith("efficientnet"):
-            # Use timm for EfficientNet variants
-            self.encoder = timm.create_model(
-                backbone, pretrained=pretrained, num_classes=0,
-            )
-            num_features = self.encoder.num_features
         else:
-            # Fallback to timm for any backbone
+            # timm: covers efficientnet, convnext, vit, swin, etc.
             self.encoder = timm.create_model(
                 backbone, pretrained=pretrained, num_classes=0,
             )
@@ -104,19 +203,17 @@ class MedicalClassifier(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.head = nn.Linear(num_features, num_classes)
 
-        # Initialize head
         nn.init.xavier_uniform_(self.head.weight)
         nn.init.zeros_(self.head.bias)
 
     def forward(self, x):
         features = self.encoder(x)
         features = self.dropout(features)
-        logits = self.head(features)
-        return logits
+        return self.head(features)
 
 
 # ---------------------------------------------------------------------------
-# Segmentation Model: U-Net with pretrained encoder
+# Segmentation Model: U-Net
 # ---------------------------------------------------------------------------
 
 class ConvBlock(nn.Module):
@@ -136,23 +233,20 @@ class ConvBlock(nn.Module):
 
 
 class UNetMedical(nn.Module):
-    """U-Net with optional pretrained ResNet encoder for medical segmentation."""
+    """U-Net for medical segmentation."""
 
     def __init__(self, num_classes, in_channels=3, base_channels=64, pretrained=True):
         super().__init__()
         ch = base_channels
 
-        # Encoder (from scratch for medical segmentation)
         self.enc1 = ConvBlock(in_channels, ch)
         self.enc2 = ConvBlock(ch, ch * 2)
         self.enc3 = ConvBlock(ch * 2, ch * 4)
         self.enc4 = ConvBlock(ch * 4, ch * 8)
         self.pool = nn.MaxPool2d(2)
 
-        # Bottleneck
         self.bottleneck = ConvBlock(ch * 8, ch * 16)
 
-        # Decoder
         self.up4 = nn.ConvTranspose2d(ch * 16, ch * 8, 2, stride=2)
         self.dec4 = ConvBlock(ch * 16, ch * 8)
         self.up3 = nn.ConvTranspose2d(ch * 8, ch * 4, 2, stride=2)
@@ -163,7 +257,6 @@ class UNetMedical(nn.Module):
         self.dec1 = ConvBlock(ch * 2, ch)
 
         self.head = nn.Conv2d(ch, num_classes, 1)
-
         self._init_weights()
 
     def _init_weights(self):
@@ -193,6 +286,41 @@ class UNetMedical(nn.Module):
 # Loss functions
 # ---------------------------------------------------------------------------
 
+class FocalLoss(nn.Module):
+    """Focal loss for classification (handles class imbalance)."""
+
+    def __init__(self, gamma=2.0, weight=None, label_smoothing=0.0):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.label_smoothing = label_smoothing
+
+    def forward(self, logits, targets):
+        ce = F.cross_entropy(logits, targets, weight=self.weight,
+                             label_smoothing=self.label_smoothing, reduction="none")
+        pt = torch.exp(-ce)
+        focal = ((1 - pt) ** self.gamma * ce).mean()
+        return focal
+
+
+class FocalBCELoss(nn.Module):
+    """Focal loss for multi-label (sigmoid) classification."""
+
+    def __init__(self, gamma=2.0, pos_weight=None):
+        super().__init__()
+        self.gamma = gamma
+        self.pos_weight = pos_weight
+
+    def forward(self, logits, targets):
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, pos_weight=self.pos_weight, reduction="none"
+        )
+        probs = torch.sigmoid(logits)
+        pt = targets * probs + (1 - targets) * (1 - probs)
+        focal = ((1 - pt) ** self.gamma * bce).mean()
+        return focal
+
+
 class DiceBCELoss(nn.Module):
     """Combined Dice + BCE loss for segmentation."""
 
@@ -203,8 +331,7 @@ class DiceBCELoss(nn.Module):
     def forward(self, logits, targets):
         bce = F.cross_entropy(logits, targets, ignore_index=-1)
 
-        # Dice on foreground class
-        probs = F.softmax(logits, dim=1)[:, 1]  # foreground probability
+        probs = F.softmax(logits, dim=1)[:, 1]
         targets_float = (targets == 1).float()
         intersection = (probs * targets_float).sum()
         dice = 1 - (2 * intersection + 1) / (probs.sum() + targets_float.sum() + 1)
@@ -228,14 +355,66 @@ def get_lr_multiplier(progress):
 
 
 # ---------------------------------------------------------------------------
+# Checkpointing
+# ---------------------------------------------------------------------------
+
+def save_checkpoint(model, results, config, path):
+    """Save model checkpoint with metadata."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    # Unwrap compiled model
+    raw_model = model
+    if hasattr(model, "_orig_mod"):
+        raw_model = model._orig_mod
+
+    checkpoint = {
+        "model_state_dict": raw_model.state_dict(),
+        "results": results,
+        "config": config,
+    }
+    torch.save(checkpoint, path)
+    print(f"Checkpoint saved: {path}")
+
+
+# ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--recipe", type=str, default=None,
+                        help="Load a recipe from recipes/ (e.g., chexnet, aptos_winner)")
+    parser.add_argument("--save-checkpoint", action="store_true",
+                        help="Save best model checkpoint to checkpoints/")
+    parser.add_argument("--list-recipes", action="store_true",
+                        help="List available recipes and exit")
     args = parser.parse_args()
 
+    # List recipes
+    if args.list_recipes:
+        recipe_dir = Path(__file__).parent / "recipes"
+        print("\nAvailable recipes:\n")
+        for recipe_file in sorted(recipe_dir.glob("*.yaml")):
+            name = recipe_file.stem
+            # Read first non-comment line for description
+            with open(recipe_file) as f:
+                desc = ""
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("#") and not desc:
+                        desc = line.lstrip("# ").strip()
+                        break
+            print(f"  {name:<24s} {desc}")
+        print(f"\nUsage: uv run train.py --recipe <name>")
+        return
+
+    # Load recipe if specified
+    if args.recipe:
+        recipe = load_recipe(args.recipe)
+        apply_recipe(recipe)
+
+    # CLI overrides recipe
     dataset = args.dataset or DATASET
     cfg = DATASETS[dataset]
     task = cfg["task"]
@@ -268,7 +447,6 @@ def main():
         )
         batch_size = BATCH_SIZE
     elif task == "segmentation":
-        in_ch = 3  # grayscale images are expanded to 3ch in transforms
         model = UNetMedical(
             num_classes=num_classes,
             in_channels=cfg["in_channels"],
@@ -281,7 +459,8 @@ def main():
 
     model = model.to(device)
     num_params = sum(p.numel() for p in model.parameters())
-    print(f"Model: {BACKBONE if task != 'segmentation' else 'U-Net'}")
+    backbone_name = BACKBONE if task != "segmentation" else "unet"
+    print(f"Model: {backbone_name}")
     print(f"Pretrained: {PRETRAINED}")
     print(f"Parameters: {num_params:,}")
 
@@ -306,10 +485,17 @@ def main():
         raise ValueError(f"Unknown optimizer: {OPTIMIZER}")
 
     # Loss function
-    if is_multilabel:
-        # CheXNet: BCEWithLogitsLoss for multi-label
+    loss_type = LOSS_TYPE
+    if loss_type == "auto":
+        if is_multilabel:
+            loss_type = "bce"
+        elif task == "segmentation":
+            loss_type = "dice_bce"
+        else:
+            loss_type = "cross_entropy"
+
+    if loss_type == "bce":
         if USE_CLASS_WEIGHTS:
-            # For multi-label, compute pos_weight from class frequencies
             try:
                 w = get_class_weights(dataset, device)
                 criterion = nn.BCEWithLogitsLoss(pos_weight=w)
@@ -317,10 +503,31 @@ def main():
                 criterion = nn.BCEWithLogitsLoss()
         else:
             criterion = nn.BCEWithLogitsLoss()
-    elif task == "segmentation":
+    elif loss_type == "focal" and is_multilabel:
+        if USE_CLASS_WEIGHTS:
+            try:
+                w = get_class_weights(dataset, device)
+                criterion = FocalBCELoss(gamma=FOCAL_GAMMA, pos_weight=w)
+            except Exception:
+                criterion = FocalBCELoss(gamma=FOCAL_GAMMA)
+        else:
+            criterion = FocalBCELoss(gamma=FOCAL_GAMMA)
+    elif loss_type == "focal":
+        if USE_CLASS_WEIGHTS:
+            try:
+                w = get_class_weights(dataset, device)
+                criterion = FocalLoss(gamma=FOCAL_GAMMA, weight=w,
+                                      label_smoothing=LABEL_SMOOTHING)
+            except Exception:
+                criterion = FocalLoss(gamma=FOCAL_GAMMA,
+                                      label_smoothing=LABEL_SMOOTHING)
+        else:
+            criterion = FocalLoss(gamma=FOCAL_GAMMA,
+                                  label_smoothing=LABEL_SMOOTHING)
+    elif loss_type == "dice_bce":
         criterion = DiceBCELoss(dice_weight=0.5)
     else:
-        # Standard classification
+        # cross_entropy
         if USE_CLASS_WEIGHTS:
             try:
                 w = get_class_weights(dataset, device)
@@ -329,6 +536,8 @@ def main():
                 criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
         else:
             criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+
+    print(f"Loss: {loss_type}")
 
     # Dataloader
     train_loader = make_infinite_dataloader(dataset, batch_size, split="train")
@@ -358,15 +567,12 @@ def main():
         images_d = images.to(device, non_blocking=True)
         targets_d = targets.to(device, non_blocking=True)
 
-        # Forward
         with autocast_ctx:
             logits = model(images_d)
             loss = criterion(logits, targets_d)
 
-        # Backward
         scaler.scale(loss).backward()
 
-        # LR schedule
         progress = min(total_training_time / TIME_BUDGET, 1.0)
         lrm = get_lr_multiplier(progress)
         for param_group in optimizer.param_groups:
@@ -378,12 +584,10 @@ def main():
 
         train_loss_f = loss.item()
 
-        # Fast fail
-        if train_loss_f > 100 or train_loss_f != train_loss_f:  # NaN check
+        if train_loss_f > 100 or train_loss_f != train_loss_f:
             print("FAIL: loss exploded or NaN")
             exit(1)
 
-        # Prefetch next batch
         images, targets, epoch = next(train_loader)
 
         torch.cuda.synchronize()
@@ -393,7 +597,6 @@ def main():
         if step > 5:
             total_training_time += dt
 
-        # Logging
         ema_beta = 0.9
         smooth_train_loss = ema_beta * smooth_train_loss + (1 - ema_beta) * train_loss_f
         debiased_smooth_loss = smooth_train_loss / (1 - ema_beta ** (step + 1))
@@ -410,7 +613,6 @@ def main():
             end="", flush=True,
         )
 
-        # GC management
         if step == 0:
             gc.collect()
             gc.freeze()
@@ -423,7 +625,7 @@ def main():
         if step > 5 and total_training_time >= TIME_BUDGET:
             break
 
-    print()  # newline after \r training log
+    print()
 
     # -----------------------------------------------------------------------
     # Evaluation
@@ -469,7 +671,21 @@ def main():
     print(f"num_epochs:       {epoch}")
     print(f"dataset:          {dataset}")
     print(f"task:             {task}")
-    print(f"backbone:         {BACKBONE if task != 'segmentation' else 'unet'}")
+    print(f"backbone:         {backbone_name}")
+    if args.recipe:
+        print(f"recipe:           {args.recipe}")
+
+    # Save checkpoint if requested
+    if args.save_checkpoint:
+        ckpt_config = {
+            "dataset": dataset, "task": task, "backbone": backbone_name,
+            "num_classes": num_classes, "batch_size": batch_size,
+            "optimizer": OPTIMIZER, "learning_rate": LEARNING_RATE,
+            "loss": loss_type, "recipe": args.recipe,
+        }
+        ckpt_name = f"{dataset}_{backbone_name}_{primary_metric:.1f}.pth"
+        ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt_name)
+        save_checkpoint(model, results, ckpt_config, ckpt_path)
 
 
 if __name__ == "__main__":

@@ -147,11 +147,50 @@ LOOP FOREVER:
 8. If metric improved → keep commit
 9. If metric equal or worse → `git reset` to previous
 
+### Experiment strategy: Architecture search + hyperparameter tuning
+
+The agent should try **both** architecture changes AND hyperparameter tuning. Medical imaging is especially sensitive to backbone choice — a ResNet-50 vs EfficientNet-B3 vs ConvNeXt can differ by 3-5% AUC. Suggested experiment order:
+
+**Phase 1 — Architecture sweep (experiments 1-20)**:
+Try different backbones while keeping other settings constant. The `BACKBONE` variable in `train.py` accepts any `timm` model name. Priority order:
+
+```python
+# Classification backbones to try (via timm):
+BACKBONE = "densenet121"          # CheXNet baseline
+BACKBONE = "densenet169"          # Deeper DenseNet
+BACKBONE = "resnet50"             # Classic ResNet
+BACKBONE = "efficientnet_b0"      # EfficientNet (small)
+BACKBONE = "efficientnet_b3"      # EfficientNet (medium) ← usually best value
+BACKBONE = "efficientnet_b4"      # EfficientNet (large)
+BACKBONE = "convnext_small"       # ConvNeXt
+BACKBONE = "convnext_base"        # ConvNeXt (larger)
+BACKBONE = "swin_tiny_patch4_window7_224"  # Swin Transformer
+BACKBONE = "vit_small_patch16_224"  # Vision Transformer
+BACKBONE = "tf_efficientnetv2_s"  # EfficientNetV2
+```
+
+**Phase 2 — Optimize best architecture (experiments 20-50)**:
+Take the winning backbone and tune:
+- Optimizer: Adam → AdamW → SGD with momentum
+- Learning rate: 1e-4, 3e-4, 1e-3, 3e-3
+- Loss: BCE → focal loss (gamma=1,2,3)
+- Weight decay: 1e-5, 1e-4, 1e-3, 1e-2
+- Dropout: 0.1, 0.2, 0.3, 0.5
+
+**Phase 3 — Augmentation + tricks (experiments 50-100)**:
+- Add CLAHE preprocessing
+- Add CutOut / CutMix / MixUp
+- Increase image resolution (224 → 384 → 512)
+- Label smoothing (0.05, 0.1)
+- Test-time augmentation
+- Gradual unfreezing + discriminative LR
+- EMA (exponential moving average)
+
 ### Ideas to explore (CheXNet / ChestX-ray14)
 
 - **Backbone upgrades**: DenseNet-169/201, EfficientNet-B3/B4, ConvNeXt-Small, DeiT/ViT-Small
 - **Optimizer**: AdamW (shown to improve over Adam in reproduction studies)
-- **Loss**: Focal loss (handles class imbalance in multi-label setting)
+- **Loss**: Focal loss (handles class imbalance in multi-label setting) — set `LOSS_TYPE = "focal"`
 - **Augmentation**: Color jitter, CLAHE, random rotation ±15°, CutOut
 - **Architecture**: Multi-scale feature aggregation, squeeze-and-excitation in classifier head
 - **Training**: Gradual unfreezing, cosine annealing with warm restarts, EMA
@@ -164,7 +203,7 @@ LOOP FOREVER:
 ### Ideas to explore (Segmentation)
 
 - **Architecture**: Attention U-Net, U-Net++, DeepLabV3+ with pretrained encoder
-- **Loss**: Dice + focal, boundary-aware loss, Tversky loss
+- **Loss**: Dice + focal, boundary-aware loss, Tversky loss — set `LOSS_TYPE = "dice_bce"`
 - **Post-processing**: CRF, test-time augmentation with averaging
 
 **NEVER STOP**: Once experiments begin, do NOT pause. Run until manually stopped. If stuck, try radical changes — different backbone, different loss, different augmentation strategy.

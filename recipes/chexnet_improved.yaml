@@ -1,0 +1,49 @@
+# CheXNet Improved — Based on 2025 reproduction study findings
+# arxiv 2505.06646: Reproducing and Improving CheXNet
+#
+# Key improvements over original: AdamW + focal loss + color jitter
+# Reproduction target: Mean AUC ~85-86%
+
+paper:
+  title: "Reproducing and Improving CheXNet"
+  authors: "Reproduction study, 2025"
+  year: 2025
+  arxiv: "2505.06646"
+  dataset: "NIH ChestX-ray14"
+  reported_metric: "Mean AUC ~85%"
+
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: densenet121
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: focal
+  focal_gamma: 2.0
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 10
+  color_jitter: true
+  color_jitter_brightness: 0.2
+  color_jitter_contrast: 0.2
+
+notes: |
+  Three changes from the 2025 reproduction study consistently improved CheXNet:
+  1. Focal loss instead of BCE (handles class imbalance better)
+  2. AdamW optimizer (decoupled weight decay)
+  3. Color jitter augmentation
+  Per-class F1 thresholds also helped significantly over global threshold.
