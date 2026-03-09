@@ -1,153 +1,170 @@
-# autoresearch-vision
+# autoresearch-medvision
 
-This is an experiment to have an LLM autonomously optimize image classification and segmentation models.
+Autonomous AI research for medical image classification and segmentation, focused on ophthalmology and radiology. The default task reproduces CheXNet (Rajpurkar et al., 2017).
 
 ## Setup
 
 To set up a new experiment, work with the user to:
 
-1. **Agree on a run tag**: propose a tag based on today's date (e.g. `mar9`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
+1. **Agree on a run tag**: propose a tag based on today's date and task (e.g. `mar9-chexnet`). The branch `autoresearch/<tag>` must not already exist.
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
-3. **Read the in-scope files**: The repo is small. Read these files for full context:
+3. **Read the in-scope files**:
    - `README.md` — repository context.
-   - `prepare.py` — fixed constants, data prep, dataloaders, evaluation. Do not modify.
+   - `prepare.py` — fixed constants, Kaggle download, dataloaders, evaluation metrics. **Do not modify.**
    - `train.py` — the file you modify. Model architecture, optimizer, training loop.
-4. **Verify data exists**: Check that `./data/` contains the dataset. If not, tell the human to run `uv run prepare.py` (or `uv run prepare.py --dataset voc` for segmentation).
-5. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
-6. **Confirm and go**: Confirm setup looks good.
+4. **Verify data exists**: Check that `./data/<dataset>/splits.csv` exists. If not, tell the human to run `uv run prepare.py --dataset <name>`.
+5. **Initialize results.tsv**: Create with header row. Baseline recorded after first run.
+6. **Confirm and go**.
 
-Once you get confirmation, kick off the experimentation.
+## Available Datasets
+
+Run `uv run prepare.py --list` to see all datasets. Summary:
+
+### Ophthalmology
+| Dataset | Task | Classes | Metric | Kaggle Source |
+|---------|------|---------|--------|---------------|
+| `aptos` | Classification | 5 (DR severity) | Quadratic Kappa | APTOS 2019 Blindness Detection |
+| `oct` | Classification | 4 (CNV/DME/Drusen/Normal) | Accuracy | Kermany 2018 Retinal OCT |
+| `retina_vessel` | Segmentation | 2 (vessel/background) | Dice | Retina Blood Vessel |
+
+### Radiology
+| Dataset | Task | Classes | Metric | Kaggle Source |
+|---------|------|---------|--------|---------------|
+| `chestxray14` | Multi-label | 14 pathologies | Mean AUC | NIH ChestX-ray14 (CheXNet) |
+| `chest_xray` | Classification | 2 (Normal/Pneumonia) | AUC | Chest X-ray Pneumonia |
+| `brain_mri` | Segmentation | 2 (tumor/background) | Dice | LGG MRI Segmentation |
+| `pneumothorax` | Segmentation | 2 (pneumothorax/bg) | Dice | SIIM-ACR Pneumothorax |
 
 ## Experimentation
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
+Each experiment runs on a single GPU with a **fixed 5-minute time budget**. Launch:
 
-### Task Modes
-
-- **Classification** (default): `uv run train.py` — trains on CIFAR-10, measures `val_accuracy`
-- **Classification (CIFAR-100)**: `uv run train.py --dataset cifar100` — harder classification
-- **Segmentation**: `uv run train.py --task segmentation --dataset voc` — trains on Pascal VOC, measures `val_miou`
+```bash
+uv run train.py                           # CheXNet on ChestX-ray14 (default)
+uv run train.py --dataset aptos           # DR grading
+uv run train.py --dataset brain_mri       # Brain tumor segmentation
+```
 
 **What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, augmentation strategy, etc.
-- Switch between classification and segmentation tasks.
-- Try different architectures: ResNets, ConvNeXt-style blocks, Vision Transformers, MobileNet-style depthwise separables, attention mechanisms, squeeze-and-excitation, etc.
-- Try different optimizers: SGD, Adam, AdamW, etc.
-- Try data augmentation: CutOut, MixUp, CutMix, RandAugment, etc.
+- Modify `train.py` — the only file you edit. Everything is fair game:
+  - **Backbone**: DenseNet-121/169/201, ResNet-50/101, EfficientNet-B0 through B7, ConvNeXt, Vision Transformers (via `timm`)
+  - **Optimizer**: Adam, AdamW, SGD, LARS, lookahead
+  - **Loss**: BCE, focal loss, weighted CE, Dice+BCE, ordinal regression (for DR grading)
+  - **Augmentation**: CLAHE, CutOut, MixUp, RandAugment, elastic deformations, stain normalization
+  - **Training tricks**: Freeze/unfreeze schedule, discriminative LR, EMA, test-time augmentation
+  - **Architecture**: Attention mechanisms, feature pyramid networks, multi-scale fusion
 
 **What you CANNOT do:**
-- Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, and constants.
-- Install new packages or add dependencies. You can only use what's already in `pyproject.toml` (torch, torchvision, numpy, Pillow, matplotlib, pandas).
-- Modify the evaluation functions. `evaluate_classification` and `evaluate_segmentation` in `prepare.py` are the ground truth metrics.
+- Modify `prepare.py`. It contains fixed evaluation metrics and data loading.
+- Install new packages beyond what's in `pyproject.toml`.
+- Modify the evaluation functions (`evaluate_classification`, `evaluate_multilabel`, `evaluate_segmentation`).
 
-### Goals
+### Goals by Task
 
-- **Classification**: Get the **highest val_accuracy** (%)
-- **Segmentation**: Get the **highest val_miou** (%)
+- **ChestX-ray14 (CheXNet)**: Highest **mean_auc** across 14 pathologies. Paper reports ~84.1% mean AUC.
+- **APTOS (DR grading)**: Highest **quadratic_kappa**. Competition winners achieved ~0.93.
+- **OCT classification**: Highest **accuracy**. State-of-art ~99%+.
+- **Chest X-ray (pneumonia)**: Highest **auc**.
+- **Segmentation tasks**: Highest **dice** coefficient.
 
-Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size.
+### Medical Imaging Best Practices
 
-**VRAM** is a soft constraint. Some increase is acceptable for meaningful metric gains, but it should not blow up dramatically.
+These are known to work well in medical imaging — try them:
 
-**Simplicity criterion**: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. A 0.1% accuracy improvement that adds 20 lines of hacky code? Probably not worth it. A 0.1% improvement from deleting code? Definitely keep.
-
-**The first run**: Your very first run should always be to establish the baseline, so you will run the training script as is.
+1. **Transfer learning is essential**: Always start from ImageNet pretrained. Fine-tuning beats training from scratch by large margins on small medical datasets.
+2. **Gradual unfreezing**: Freeze backbone initially, train head for a few steps, then unfreeze with discriminative learning rates (lower LR for earlier layers).
+3. **CLAHE preprocessing**: `prepare.py` exports `apply_clahe()` — improves contrast in fundus images and X-rays.
+4. **Class imbalance**: Medical datasets are almost always imbalanced. Use weighted loss, oversampling, or focal loss.
+5. **Resolution matters**: Try larger image sizes (384, 512) for pathology that depends on fine details. Trade off batch size.
+6. **Test-time augmentation (TTA)**: Average predictions over flipped/rotated versions at eval time.
+7. **Label smoothing + mixup**: Regularization that helps with small, noisy medical datasets.
+8. **Ordinal regression**: For graded diseases (DR severity 0-4), ordinal approaches > standard classification.
 
 ## Output format
 
-Once the script finishes it prints a summary like this (classification):
-
+Classification (CheXNet):
 ```
 ---
-val_accuracy:     93.25%
-val_loss:         0.234567
-training_seconds: 300.1
-total_seconds:    325.9
-peak_vram_mb:     4560.2
-num_steps:        11720
-num_params_M:     2.3
-num_epochs:       15
-dataset:          cifar10
-task:             classification
-```
-
-Or for segmentation:
-
-```
----
-val_miou:         45.20%
-val_pixel_acc:    88.50%
+mean_auc:         84.10%
+per_class_auc:
+  Atelectasis            80.94%
+  Cardiomegaly           92.48%
+  ...
 training_seconds: 300.1
 total_seconds:    340.2
-peak_vram_mb:     8230.5
-num_steps:        2340
-num_params_M:     17.3
-num_epochs:       8
-dataset:          voc
-task:             segmentation
+peak_vram_mb:     6230.5
+num_steps:        5340
+num_params_M:     7.0
+num_epochs:       2
+dataset:          chestxray14
+task:             multilabel
+backbone:         densenet121
 ```
 
-You can extract the key metric from the log file:
+Segmentation:
+```
+---
+val_dice:         78.50%
+val_iou:          64.70%
+val_pixel_acc:    96.20%
+val_sensitivity:  82.30%
+val_specificity:  97.10%
+training_seconds: 300.1
+...
+```
 
-```
-grep "^val_accuracy:\|^val_miou:" run.log
-```
+Extract key metric: `grep "^mean_auc:\|^val_accuracy:\|^val_dice:\|^val_kappa:" run.log`
 
 ## Logging results
 
-When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated).
-
-The TSV has a header row and 5 columns:
+Log to `results.tsv` (tab-separated):
 
 ```
 commit	metric	memory_gb	status	description
 ```
-
-1. git commit hash (short, 7 chars)
-2. val_accuracy or val_miou achieved — use 0.00 for crashes
-3. peak memory in GB, round to .1f (divide peak_vram_mb by 1024) — use 0.0 for crashes
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
 
 Example:
-
 ```
 commit	metric	memory_gb	status	description
-a1b2c3d	91.50	4.5	keep	baseline cifar10
-b2c3d4e	92.30	4.6	keep	increase LR to 0.2 with cosine schedule
-c3d4e5f	90.10	4.5	discard	switch to GeLU activation
-d4e5f6g	0.00	0.0	crash	double model width (OOM)
+a1b2c3d	84.10	6.1	keep	baseline CheXNet DenseNet-121
+b2c3d4e	85.30	6.2	keep	switch to AdamW + focal loss
+c3d4e5f	84.00	6.1	discard	remove pretrained weights
+d4e5f6g	86.10	8.3	keep	EfficientNet-B3 backbone
+e5f6g7h	0.00	0.0	crash	ViT-Large (OOM)
 ```
 
 ## The experiment loop
 
-The experiment runs on a dedicated branch (e.g. `autoresearch/mar9`).
-
 LOOP FOREVER:
 
-1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
-3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1`
-5. Read out the results: `grep "^val_accuracy:\|^val_miou:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
-8. If the metric improved (higher accuracy or mIoU), you "advance" the branch, keeping the git commit
-9. If the metric is equal or worse, you git reset back to where you started
+1. Check git state
+2. Modify `train.py` with an experimental idea
+3. `git commit`
+4. `uv run train.py > run.log 2>&1`
+5. `grep "^mean_auc:\|^val_accuracy:\|^val_dice:" run.log`
+6. If empty → crashed. `tail -n 50 run.log` for traceback.
+7. Record in `results.tsv` (do not commit this file)
+8. If metric improved → keep commit
+9. If metric equal or worse → `git reset` to previous
 
-### Ideas to explore (classification)
+### Ideas to explore (CheXNet / ChestX-ray14)
 
-- **Architecture**: Deeper models, wider models, squeeze-and-excitation blocks, depthwise separable convolutions, attention mechanisms, ConvNeXt blocks, MobileNet-style inverted bottlenecks
-- **Optimizers**: AdamW with cosine LR, one-cycle LR, LARS, label smoothing
-- **Augmentation**: CutOut, CutMix, MixUp, RandAugment, AutoAugment, random erasing
-- **Training tricks**: Stochastic depth, drop path, EMA, progressive resizing
-- **Efficiency**: Knowledge distillation (self-distillation), channel pruning
+- **Backbone upgrades**: DenseNet-169/201, EfficientNet-B3/B4, ConvNeXt-Small, DeiT/ViT-Small
+- **Optimizer**: AdamW (shown to improve over Adam in reproduction studies)
+- **Loss**: Focal loss (handles class imbalance in multi-label setting)
+- **Augmentation**: Color jitter, CLAHE, random rotation ±15°, CutOut
+- **Architecture**: Multi-scale feature aggregation, squeeze-and-excitation in classifier head
+- **Training**: Gradual unfreezing, cosine annealing with warm restarts, EMA
 
-### Ideas to explore (segmentation)
+### Ideas to explore (Ophthalmology)
 
-- **Architecture**: DeepLab-style ASPP, FPN, PSPNet pooling, attention gates in U-Net, dilated convolutions, lightweight decoders
-- **Loss functions**: Dice loss, focal loss, boundary loss, combined CE + Dice
-- **Augmentation**: Color jitter, random scale, random rotation, multi-scale training
-- **Training tricks**: Auxiliary losses at intermediate scales, deep supervision
+- **DR grading**: Ordinal regression loss, CLAHE preprocessing, larger input resolution (384/512), attention-based pooling
+- **OCT**: Fine-grained classification with mixup, self-supervised pretraining
 
-**NEVER STOP**: Once the experiment loop has begun, do NOT pause to ask the human if you should continue. The loop runs until the human interrupts you, period. If you run out of ideas, think harder.
+### Ideas to explore (Segmentation)
+
+- **Architecture**: Attention U-Net, U-Net++, DeepLabV3+ with pretrained encoder
+- **Loss**: Dice + focal, boundary-aware loss, Tversky loss
+- **Post-processing**: CRF, test-time augmentation with averaging
+
+**NEVER STOP**: Once experiments begin, do NOT pause. Run until manually stopped. If stuck, try radical changes — different backbone, different loss, different augmentation strategy.

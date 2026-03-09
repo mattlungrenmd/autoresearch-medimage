@@ -1,11 +1,15 @@
 """
-Autoresearch-Vision training script. Single-GPU, single-file.
-Adapted from karpathy/autoresearch for image classification and segmentation.
+Autoresearch-MedVision training script. Single-GPU, single-file.
+Default configuration reproduces CheXNet (Rajpurkar et al., 2017):
+  DenseNet-121 pretrained on ImageNet, fine-tuned on ChestX-ray14
+  for 14-pathology multi-label classification.
 
 Usage:
-    uv run train.py                          # CIFAR-10 classification (default)
-    uv run train.py --task segmentation      # VOC segmentation
-    uv run train.py --dataset cifar100       # CIFAR-100 classification
+    uv run train.py                                    # CheXNet on ChestX-ray14 (default)
+    uv run train.py --dataset aptos                    # DR grading
+    uv run train.py --dataset chest_xray               # Pneumonia binary
+    uv run train.py --dataset brain_mri                # Brain tumor segmentation
+    uv run train.py --dataset oct                      # Retinal OCT classification
 """
 
 import os
@@ -18,117 +22,104 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
+import timm
 
 from prepare import (
     TIME_BUDGET, DATASETS,
     make_infinite_dataloader, make_dataloader,
-    evaluate_classification, evaluate_segmentation,
+    evaluate_classification, evaluate_multilabel, evaluate_segmentation,
+    get_class_weights,
 )
 
 # ---------------------------------------------------------------------------
 # Hyperparameters (edit these directly, no CLI flags needed)
 # ---------------------------------------------------------------------------
 
-# Task selection
-DATASET = "cifar10"           # "cifar10", "cifar100", or "voc"
-TASK = "classification"       # "classification" or "segmentation"
+# Task selection — default: CheXNet reproduction
+DATASET = "chestxray14"       # "chestxray14", "aptos", "oct", "chest_xray", "brain_mri", etc.
 
 # Model architecture
-BASE_CHANNELS = 64            # base channel width
-DEPTH = 4                     # number of residual blocks per stage
-NUM_STAGES = 3                # number of downsampling stages
+BACKBONE = "densenet121"      # CheXNet uses DenseNet-121
+PRETRAINED = True             # ImageNet pretrained (critical for medical imaging)
+DROPOUT = 0.2                 # dropout before final classifier
 
-# Optimization
-BATCH_SIZE = 128              # training batch size
-LEARNING_RATE = 0.1           # initial learning rate
-MOMENTUM = 0.9                # SGD momentum
-WEIGHT_DECAY = 5e-4           # L2 regularization
-WARMUP_RATIO = 0.05           # fraction of time budget for LR warmup
+# Optimization — CheXNet paper settings
+BATCH_SIZE = 16               # CheXNet used 16
+LEARNING_RATE = 0.001         # Adam LR
+OPTIMIZER = "adam"            # "adam", "adamw", "sgd"
+WEIGHT_DECAY = 1e-4           # L2 regularization
+WARMUP_RATIO = 0.02           # fraction of time budget for LR warmup
 WARMDOWN_RATIO = 0.3          # fraction of time budget for cosine decay
 
+# Loss
+USE_CLASS_WEIGHTS = True      # handle class imbalance
+LABEL_SMOOTHING = 0.0         # label smoothing for classification
+
 # Segmentation-specific
-SEG_BATCH_SIZE = 16           # batch size for segmentation (larger images)
+SEG_BATCH_SIZE = 8            # batch size for segmentation (larger images)
+SEG_BASE_CHANNELS = 64        # U-Net base channels
 
 # ---------------------------------------------------------------------------
-# Classification Model: ResNet-style
+# Classification Model: CheXNet-style (DenseNet-121 + pretrained)
 # ---------------------------------------------------------------------------
 
-class ConvBNReLU(nn.Module):
-    def __init__(self, in_ch, out_ch, kernel_size=3, stride=1, padding=1):
+class MedicalClassifier(nn.Module):
+    """Pretrained backbone + classification head.
+    Default: DenseNet-121 (CheXNet architecture).
+    Supports: densenet121, densenet169, densenet201, resnet50, efficientnet_b0-b4.
+    """
+
+    def __init__(self, num_classes, backbone="densenet121", pretrained=True,
+                 dropout=0.2, multilabel=False):
         super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, kernel_size, stride, padding, bias=False)
-        self.bn = nn.BatchNorm2d(out_ch)
+        self.multilabel = multilabel
+
+        if backbone.startswith("densenet"):
+            # DenseNet family (CheXNet default)
+            self.encoder = getattr(models, backbone)(
+                weights="IMAGENET1K_V1" if pretrained else None,
+            )
+            num_features = self.encoder.classifier.in_features
+            self.encoder.classifier = nn.Identity()
+        elif backbone.startswith("resnet"):
+            self.encoder = getattr(models, backbone)(
+                weights="IMAGENET1K_V1" if pretrained else None,
+            )
+            num_features = self.encoder.fc.in_features
+            self.encoder.fc = nn.Identity()
+        elif backbone.startswith("efficientnet"):
+            # Use timm for EfficientNet variants
+            self.encoder = timm.create_model(
+                backbone, pretrained=pretrained, num_classes=0,
+            )
+            num_features = self.encoder.num_features
+        else:
+            # Fallback to timm for any backbone
+            self.encoder = timm.create_model(
+                backbone, pretrained=pretrained, num_classes=0,
+            )
+            num_features = self.encoder.num_features
+
+        self.dropout = nn.Dropout(dropout)
+        self.head = nn.Linear(num_features, num_classes)
+
+        # Initialize head
+        nn.init.xavier_uniform_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
 
     def forward(self, x):
-        return F.relu(self.bn(self.conv(x)), inplace=True)
-
-
-class ResBlock(nn.Module):
-    def __init__(self, channels, stride=1):
-        super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, stride, 1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, 3, 1, 1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)
-
-    def forward(self, x):
-        residual = x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        out = self.bn2(self.conv2(out))
-        out = out + residual
-        return F.relu(out, inplace=True)
-
-
-class ImageClassifier(nn.Module):
-    """Simple ResNet-style classifier."""
-
-    def __init__(self, num_classes, in_channels=3, base_channels=64,
-                 depth=4, num_stages=3):
-        super().__init__()
-        self.stem = ConvBNReLU(in_channels, base_channels)
-
-        stages = []
-        ch = base_channels
-        for stage_idx in range(num_stages):
-            if stage_idx > 0:
-                # Downsample: double channels, halve spatial
-                new_ch = ch * 2
-                stages.append(ConvBNReLU(ch, new_ch, stride=2))
-                ch = new_ch
-            for _ in range(depth):
-                stages.append(ResBlock(ch))
-        self.stages = nn.Sequential(*stages)
-
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Linear(ch, num_classes)
-
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, std=0.01)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, x):
-        x = self.stem(x)
-        x = self.stages(x)
-        x = self.pool(x)
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
-        return x
+        features = self.encoder(x)
+        features = self.dropout(features)
+        logits = self.head(features)
+        return logits
 
 
 # ---------------------------------------------------------------------------
-# Segmentation Model: U-Net style
+# Segmentation Model: U-Net with pretrained encoder
 # ---------------------------------------------------------------------------
 
-class DoubleConv(nn.Module):
+class ConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
         self.conv = nn.Sequential(
@@ -144,33 +135,32 @@ class DoubleConv(nn.Module):
         return self.conv(x)
 
 
-class UNetSegmenter(nn.Module):
-    """Compact U-Net for segmentation."""
+class UNetMedical(nn.Module):
+    """U-Net with optional pretrained ResNet encoder for medical segmentation."""
 
-    def __init__(self, num_classes, in_channels=3, base_channels=64, depth=4):
+    def __init__(self, num_classes, in_channels=3, base_channels=64, pretrained=True):
         super().__init__()
         ch = base_channels
 
-        # Encoder
-        self.enc1 = DoubleConv(in_channels, ch)
-        self.enc2 = DoubleConv(ch, ch * 2)
-        self.enc3 = DoubleConv(ch * 2, ch * 4)
-        self.enc4 = DoubleConv(ch * 4, ch * 8)
-
+        # Encoder (from scratch for medical segmentation)
+        self.enc1 = ConvBlock(in_channels, ch)
+        self.enc2 = ConvBlock(ch, ch * 2)
+        self.enc3 = ConvBlock(ch * 2, ch * 4)
+        self.enc4 = ConvBlock(ch * 4, ch * 8)
         self.pool = nn.MaxPool2d(2)
 
         # Bottleneck
-        self.bottleneck = DoubleConv(ch * 8, ch * 16)
+        self.bottleneck = ConvBlock(ch * 8, ch * 16)
 
         # Decoder
         self.up4 = nn.ConvTranspose2d(ch * 16, ch * 8, 2, stride=2)
-        self.dec4 = DoubleConv(ch * 16, ch * 8)
+        self.dec4 = ConvBlock(ch * 16, ch * 8)
         self.up3 = nn.ConvTranspose2d(ch * 8, ch * 4, 2, stride=2)
-        self.dec3 = DoubleConv(ch * 8, ch * 4)
+        self.dec3 = ConvBlock(ch * 8, ch * 4)
         self.up2 = nn.ConvTranspose2d(ch * 4, ch * 2, 2, stride=2)
-        self.dec2 = DoubleConv(ch * 4, ch * 2)
+        self.dec2 = ConvBlock(ch * 4, ch * 2)
         self.up1 = nn.ConvTranspose2d(ch * 2, ch, 2, stride=2)
-        self.dec1 = DoubleConv(ch * 2, ch)
+        self.dec1 = ConvBlock(ch * 2, ch)
 
         self.head = nn.Conv2d(ch, num_classes, 1)
 
@@ -185,22 +175,41 @@ class UNetSegmenter(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        # Encoder
         e1 = self.enc1(x)
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))
         e4 = self.enc4(self.pool(e3))
-
-        # Bottleneck
         b = self.bottleneck(self.pool(e4))
 
-        # Decoder with skip connections
         d4 = self.dec4(torch.cat([self.up4(b), e4], dim=1))
         d3 = self.dec3(torch.cat([self.up3(d4), e3], dim=1))
         d2 = self.dec2(torch.cat([self.up2(d3), e2], dim=1))
         d1 = self.dec1(torch.cat([self.up1(d2), e1], dim=1))
 
         return self.head(d1)
+
+
+# ---------------------------------------------------------------------------
+# Loss functions
+# ---------------------------------------------------------------------------
+
+class DiceBCELoss(nn.Module):
+    """Combined Dice + BCE loss for segmentation."""
+
+    def __init__(self, dice_weight=0.5):
+        super().__init__()
+        self.dice_weight = dice_weight
+
+    def forward(self, logits, targets):
+        bce = F.cross_entropy(logits, targets, ignore_index=-1)
+
+        # Dice on foreground class
+        probs = F.softmax(logits, dim=1)[:, 1]  # foreground probability
+        targets_float = (targets == 1).float()
+        intersection = (probs * targets_float).sum()
+        dice = 1 - (2 * intersection + 1) / (probs.sum() + targets_float.sum() + 1)
+
+        return (1 - self.dice_weight) * bce + self.dice_weight * dice
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +224,6 @@ def get_lr_multiplier(progress):
         return 1.0
     else:
         cooldown_progress = (1.0 - progress) / WARMDOWN_RATIO
-        # Cosine decay to 0
         return 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * (1 - cooldown_progress))).item())
 
 
@@ -226,22 +234,19 @@ def get_lr_multiplier(progress):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default=None)
-    parser.add_argument("--task", type=str, default=None)
     args = parser.parse_args()
 
     dataset = args.dataset or DATASET
-    task = args.task or TASK
-
-    # Auto-detect task from dataset
-    if dataset == "voc":
-        task = "segmentation"
-
     cfg = DATASETS[dataset]
+    task = cfg["task"]
     num_classes = cfg["num_classes"]
+    is_multilabel = (task == "multilabel")
 
     print(f"Task: {task}")
     print(f"Dataset: {dataset}")
     print(f"Num classes: {num_classes}")
+    if is_multilabel:
+        print(f"Pathologies: {', '.join(cfg['class_names'])}")
 
     # Setup
     t_start = time.time()
@@ -253,18 +258,22 @@ def main():
     scaler = torch.amp.GradScaler()
 
     # Build model
-    if task == "classification":
-        model = ImageClassifier(
+    if task in ("classification", "multilabel"):
+        model = MedicalClassifier(
             num_classes=num_classes,
-            base_channels=BASE_CHANNELS,
-            depth=DEPTH,
-            num_stages=NUM_STAGES,
+            backbone=BACKBONE,
+            pretrained=PRETRAINED,
+            dropout=DROPOUT,
+            multilabel=is_multilabel,
         )
         batch_size = BATCH_SIZE
     elif task == "segmentation":
-        model = UNetSegmenter(
+        in_ch = 3  # grayscale images are expanded to 3ch in transforms
+        model = UNetMedical(
             num_classes=num_classes,
-            base_channels=BASE_CHANNELS,
+            in_channels=cfg["in_channels"],
+            base_channels=SEG_BASE_CHANNELS,
+            pretrained=PRETRAINED,
         )
         batch_size = SEG_BATCH_SIZE
     else:
@@ -272,18 +281,54 @@ def main():
 
     model = model.to(device)
     num_params = sum(p.numel() for p in model.parameters())
-    print(f"Model parameters: {num_params:,}")
+    print(f"Model: {BACKBONE if task != 'segmentation' else 'U-Net'}")
+    print(f"Pretrained: {PRETRAINED}")
+    print(f"Parameters: {num_params:,}")
 
     # Compile model
     model = torch.compile(model, dynamic=False)
 
     # Optimizer
-    optimizer = torch.optim.SGD(
-        model.parameters(),
-        lr=LEARNING_RATE,
-        momentum=MOMENTUM,
-        weight_decay=WEIGHT_DECAY,
-    )
+    if OPTIMIZER == "adam":
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY,
+        )
+    elif OPTIMIZER == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY,
+        )
+    elif OPTIMIZER == "sgd":
+        optimizer = torch.optim.SGD(
+            model.parameters(), lr=LEARNING_RATE,
+            momentum=0.9, weight_decay=WEIGHT_DECAY,
+        )
+    else:
+        raise ValueError(f"Unknown optimizer: {OPTIMIZER}")
+
+    # Loss function
+    if is_multilabel:
+        # CheXNet: BCEWithLogitsLoss for multi-label
+        if USE_CLASS_WEIGHTS:
+            # For multi-label, compute pos_weight from class frequencies
+            try:
+                w = get_class_weights(dataset, device)
+                criterion = nn.BCEWithLogitsLoss(pos_weight=w)
+            except Exception:
+                criterion = nn.BCEWithLogitsLoss()
+        else:
+            criterion = nn.BCEWithLogitsLoss()
+    elif task == "segmentation":
+        criterion = DiceBCELoss(dice_weight=0.5)
+    else:
+        # Standard classification
+        if USE_CLASS_WEIGHTS:
+            try:
+                w = get_class_weights(dataset, device)
+                criterion = nn.CrossEntropyLoss(weight=w, label_smoothing=LABEL_SMOOTHING)
+            except Exception:
+                criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+        else:
+            criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
 
     # Dataloader
     train_loader = make_infinite_dataloader(dataset, batch_size, split="train")
@@ -291,6 +336,8 @@ def main():
 
     print(f"Time budget: {TIME_BUDGET}s")
     print(f"Batch size: {batch_size}")
+    print(f"Optimizer: {OPTIMIZER}")
+    print(f"Learning rate: {LEARNING_RATE}")
     print()
 
     # -----------------------------------------------------------------------
@@ -308,16 +355,13 @@ def main():
         torch.cuda.synchronize()
         t0 = time.time()
 
-        images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
+        images_d = images.to(device, non_blocking=True)
+        targets_d = targets.to(device, non_blocking=True)
 
         # Forward
         with autocast_ctx:
-            logits = model(images)
-            if task == "classification":
-                loss = F.cross_entropy(logits, targets)
-            else:
-                # Segmentation: ignore index -1
-                loss = F.cross_entropy(logits, targets, ignore_index=-1)
+            logits = model(images_d)
+            loss = criterion(logits, targets_d)
 
         # Backward
         scaler.scale(loss).backward()
@@ -335,8 +379,8 @@ def main():
         train_loss_f = loss.item()
 
         # Fast fail
-        if train_loss_f > 100:
-            print("FAIL: loss exploded")
+        if train_loss_f > 100 or train_loss_f != train_loss_f:  # NaN check
+            print("FAIL: loss exploded or NaN")
             exit(1)
 
         # Prefetch next batch
@@ -359,7 +403,7 @@ def main():
         print(
             f"\rstep {step:05d} ({pct_done:.1f}%) | "
             f"loss: {debiased_smooth_loss:.4f} | "
-            f"lr: {LEARNING_RATE * lrm:.5f} | "
+            f"lr: {LEARNING_RATE * lrm:.6f} | "
             f"dt: {dt * 1000:.0f}ms | "
             f"epoch: {epoch} | "
             f"remaining: {remaining:.0f}s    ",
@@ -386,21 +430,32 @@ def main():
     # -----------------------------------------------------------------------
 
     model.eval()
+    print("---")
 
-    if task == "classification":
-        accuracy, val_loss = evaluate_classification(model, dataset, batch_size, device)
-        metric_name = "val_accuracy"
-        metric_value = accuracy
-        print("---")
-        print(f"val_accuracy:     {accuracy:.2f}%")
-        print(f"val_loss:         {val_loss:.6f}")
-    else:
-        miou, pixel_acc = evaluate_segmentation(model, batch_size, device)
-        metric_name = "val_miou"
-        metric_value = miou
-        print("---")
-        print(f"val_miou:         {miou:.2f}%")
-        print(f"val_pixel_acc:    {pixel_acc:.2f}%")
+    if is_multilabel:
+        results = evaluate_multilabel(model, dataset, batch_size, device)
+        primary_metric = results["mean_auc"]
+        print(f"mean_auc:         {results['mean_auc']:.2f}%")
+        print("per_class_auc:")
+        for pathology, auc in results["per_class_auc"].items():
+            print(f"  {pathology:<22s} {auc:.2f}%")
+
+    elif task == "classification":
+        results = evaluate_classification(model, dataset, batch_size, device)
+        primary_metric = results.get("auc", results["accuracy"])
+        print(f"val_accuracy:     {results['accuracy']:.2f}%")
+        print(f"val_auc:          {results['auc']:.2f}%")
+        print(f"val_kappa:        {results['kappa']:.4f}")
+        print(f"val_loss:         {results['loss']:.6f}")
+
+    elif task == "segmentation":
+        results = evaluate_segmentation(model, dataset, batch_size, device)
+        primary_metric = results["dice"]
+        print(f"val_dice:         {results['dice']:.2f}%")
+        print(f"val_iou:          {results['iou']:.2f}%")
+        print(f"val_pixel_acc:    {results['pixel_acc']:.2f}%")
+        print(f"val_sensitivity:  {results['sensitivity']:.2f}%")
+        print(f"val_specificity:  {results['specificity']:.2f}%")
 
     # Summary
     t_end = time.time()
@@ -414,6 +469,7 @@ def main():
     print(f"num_epochs:       {epoch}")
     print(f"dataset:          {dataset}")
     print(f"task:             {task}")
+    print(f"backbone:         {BACKBONE if task != 'segmentation' else 'unet'}")
 
 
 if __name__ == "__main__":

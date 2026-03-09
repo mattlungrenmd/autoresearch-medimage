@@ -1,7 +1,7 @@
 [project]
-name = "autoresearch-vision"
+name = "autoresearch-medvision"
 version = "0.1.0"
-description = "Autonomous AI research for image classification and segmentation"
+description = "Autonomous AI research for medical image classification and segmentation (ophthalmology + radiology)"
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.2.0",
@@ -10,6 +10,11 @@ dependencies = [
     "Pillow>=10.0.0",
     "matplotlib>=3.8.0",
     "pandas>=2.1.0",
+    "scikit-learn>=1.4.0",
+    "kaggle>=1.6.0",
+    "opencv-python-headless>=4.9.0",
+    "albumentations>=1.4.0",
+    "timm>=1.0.0",
 ]
 
 [tool.uv]
