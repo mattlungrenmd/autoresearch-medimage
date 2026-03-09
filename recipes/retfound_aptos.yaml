@@ -1,0 +1,42 @@
+# APTOS DR grading with RETFound backbone — retinal foundation model
+# RETFound pretrained on 1.6M retinal images (fundus + OCT) via MAE
+#
+# Expected: Significant improvement over ImageNet-pretrained models
+# for retinal disease grading tasks
+
+paper:
+  title: "DR Grading with RETFound backbone"
+  dataset: "APTOS 2019 (Diabetic Retinopathy)"
+  reported_metric: "Quadratic Kappa ~0.94+ (expected with retinal pretraining)"
+
+dataset: aptos
+task: classification
+
+model:
+  backbone: "hf:rmaphoh/RETFound_MAE"
+  pretrained: true
+  dropout: 0.3
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.00003
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.4
+  label_smoothing: 0.1
+
+loss:
+  type: cross_entropy
+  class_weights: true
+
+image_size: 224
+
+notes: |
+  RETFound (Zhou et al., Nature 2023) is a foundation model for retinal
+  imaging pretrained on 1.6M retinal images using masked autoencoder (MAE).
+  It achieved state-of-the-art on multiple ophthalmology benchmarks
+  including DR grading, glaucoma detection, and OCT disease classification.
+  The ViT-Large encoder captures fine-grained retinal features that
+  ImageNet-pretrained models miss. Use very low LR (3e-5) to preserve
+  the domain-specific features learned during pretraining.

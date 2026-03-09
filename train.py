@@ -171,32 +171,56 @@ CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check
 # ---------------------------------------------------------------------------
 
 class HuggingFaceVisionEncoder(nn.Module):
-    """Wrapper for HuggingFace vision models used as feature extractors."""
+    """Wrapper for HuggingFace vision models used as feature extractors.
+
+    Handles multiple model architectures:
+    - CLIP-style models (BiomedCLIP, MedCLIP, PLIP): extracts vision encoder
+    - DINOv2-style models (RAD-DINO): uses CLS token from ViT
+    - MAE-style models (RETFound): uses CLS token from ViT encoder
+    - Standard ViT models: uses pooler output or CLS token
+    """
 
     def __init__(self, model_name, pretrained=True):
         super().__init__()
         from transformers import AutoModel, AutoConfig
 
         config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-        if pretrained:
-            self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
-        else:
-            self.model = AutoModel.from_config(config, trust_remote_code=True)
+        model_type = getattr(config, "model_type", "")
 
-        # Determine feature dimension from config
-        self.num_features = getattr(config, "hidden_size",
-                            getattr(config, "projection_dim",
-                            getattr(config, "embed_dim", 768)))
+        if pretrained:
+            full_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        else:
+            full_model = AutoModel.from_config(config, trust_remote_code=True)
+
+        # Extract the vision encoder for CLIP-style models
+        if model_type in ("clip", "clap") or hasattr(full_model, "vision_model"):
+            self.model = full_model.vision_model
+            vision_config = getattr(config, "vision_config", config)
+            self.num_features = getattr(vision_config, "hidden_size",
+                                getattr(vision_config, "projection_dim", 768))
+        else:
+            self.model = full_model
+            self.num_features = getattr(config, "hidden_size",
+                                getattr(config, "projection_dim",
+                                getattr(config, "embed_dim", 768)))
+
+        self._model_type = model_type
 
     def forward(self, x):
-        outputs = self.model(pixel_values=x)
-        # Handle different model output formats
+        if self._model_type in ("clip", "clap") or hasattr(self.model, "embeddings"):
+            # CLIP vision model takes pixel_values directly
+            outputs = self.model(pixel_values=x)
+        else:
+            outputs = self.model(pixel_values=x)
+
+        # Handle different output formats
         if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
             return outputs.pooler_output
         elif hasattr(outputs, "last_hidden_state"):
             return outputs.last_hidden_state[:, 0]  # CLS token
         else:
-            return outputs[0][:, 0] if len(outputs[0].shape) == 3 else outputs[0]
+            out = outputs[0]
+            return out[:, 0] if len(out.shape) == 3 else out
 
 
 class MedicalClassifier(nn.Module):
