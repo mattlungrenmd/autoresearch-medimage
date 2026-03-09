@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data cache
+data/
+
+# Training artifacts
+run.log
+results.tsv
+checkpoints/
+*.pth
+*.pt
+
+# Agent files (generated per-session)
+CLAUDE.md
+AGENTS.md
+
+# Dev
+dev/
+worktrees/
+
+# IDE
+.vscode/
+.idea/
