@@ -24,8 +24,8 @@ REGULATORY_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(REGULATORY_DIR)
 TEMPLATES_DIR = os.path.join(REGULATORY_DIR, "templates")
 OUTPUT_DIR = os.path.join(REGULATORY_DIR, "output")
-RESULTS_FILE = os.path.join(PROJECT_DIR, "results.tsv")
-CHECKPOINT_DIR = os.path.join(PROJECT_DIR, "checkpoints")
+RESULTS_FILE = os.environ.get("AUTORESEARCH_RESULTS_FILE", os.path.join(PROJECT_DIR, "results.tsv"))
+CHECKPOINT_DIR = os.environ.get("AUTORESEARCH_CHECKPOINT_DIR", os.path.join(PROJECT_DIR, "checkpoints"))
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +211,8 @@ def generate_fda_510k(config):
 
 **Device Name:** {device_name}
 **Classification:** Class II Medical Device (Computer-Aided Detection/Diagnosis)
-**Product Code:** QIH (Radiological Computer Aided Detection/Diagnosis)
-**Regulation Number:** 21 CFR 892.2080
+**Product Code:** QIH (AI-based Medical Image Analyzer, non-cancer)
+**Regulation Number:** 21 CFR 892.2050
 
 ### 1.1 Intended Use
 {intended_use}
@@ -239,13 +239,18 @@ def generate_fda_510k(config):
 | {metric_name} | {best_metric}% | [PREDICATE METRIC] | [PREDICATE METRIC] |
 
 ### 2.1 Known Predicate Devices (Computer-Aided Detection — Chest X-ray)
-| Device | Company | 510(k) Number | Clearance Date | Claimed AUC |
-|--------|---------|---------------|----------------|-------------|
-| qXR | Qure.ai | K201501 | 2020-09 | 94-99% (per pathology) |
-| Lunit INSIGHT CXR | Lunit | K200380 | 2020-05 | 97-99% (4 findings) |
-| Annalise CXR | Annalise.ai | K213421 | 2022-04 | 124 findings, AUC 90%+ |
-| BriefCase (Zebra) | Zebra Medical | K191154 | 2019-10 | Pneumothorax 94%+ |
-| InferRead DR Chest | Infervision | K212946 | 2022 | AUC > 95% |
+
+**IMPORTANT:** Verify all 510(k) numbers and clearance dates directly on the
+[FDA 510(k) database](https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm)
+before any submission. Numbers below are provided as starting points only.
+
+| Device | Company | 510(k) Number | Clearance Date | Notes |
+|--------|---------|---------------|----------------|-------|
+| qXR | Qure.ai | [VERIFY on FDA DB] | 2020+ | Multiple clearances; 26 indications across 9 products |
+| Lunit INSIGHT CXR | Lunit | K211733 | 2021-11 | Triage for pleural effusion & pneumothorax |
+| Annalise Enterprise CXR | Annalise.ai | K213941 | 2022-02 | Pneumothorax triage & notification |
+| HealthPNX | Zebra Medical | K190362 | 2019-05 | Pneumothorax detection/triage |
+| BriefCase | Aidoc Medical | [VERIFY on FDA DB] | 2022+ | AI triage, multiple indications |
 
 ### 2.2 Substantial Equivalence Argument
 [FILL IN: Explain how your device is substantially equivalent to the predicate
@@ -631,7 +636,9 @@ def main():
 
     # Auto-detect from results.tsv
     results_path = args.results or RESULTS_FILE
-    results_info = auto_detect_from_results(results_path, dataset_filter="chestxray14")
+    # Use dataset arg for filtering (default "ChestX-ray14" display name, filter key is lowercase)
+    dataset_filter_key = args.dataset.lower().replace("-", "").replace(" ", "")
+    results_info = auto_detect_from_results(results_path, dataset_filter=dataset_filter_key)
 
     # Auto-detect from checkpoint
     ckpt_path = args.checkpoint

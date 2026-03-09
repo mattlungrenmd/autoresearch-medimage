@@ -26,8 +26,8 @@ import pandas as pd
 PAPER_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(PAPER_DIR, "templates")
 PROJECT_DIR = os.path.dirname(PAPER_DIR)
-RESULTS_FILE = os.path.join(PROJECT_DIR, "results.tsv")
-CHECKPOINT_DIR = os.path.join(PROJECT_DIR, "checkpoints")
+RESULTS_FILE = os.environ.get("AUTORESEARCH_RESULTS_FILE", os.path.join(PROJECT_DIR, "results.tsv"))
+CHECKPOINT_DIR = os.environ.get("AUTORESEARCH_CHECKPOINT_DIR", os.path.join(PROJECT_DIR, "checkpoints"))
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +97,8 @@ DATASET_INFO = {
 PUBLISHED_BASELINES = {
     "chestxray14": [
         ("Wang et al.", "74.50", "2017"),
+        ("Yao et al.", "80.30", "2017"),
         ("CheXNet (Rajpurkar et al.)", "84.10", "2017"),
-        ("Reproduction study", "85.00", "2025"),
-        ("TorchXRayVision", "85.10", "2021"),
     ],
     "aptos": [
         ("Competition baseline", "0.85", "2019"),
@@ -277,8 +276,8 @@ def generate_per_class_table(checkpoint_results):
     # CheXNet reference values from the original paper
     chexnet_ref = {
         "Atelectasis": 80.94, "Cardiomegaly": 92.48, "Effusion": 86.38,
-        "Infiltration": 73.45, "Mass": 86.81, "Nodule": 78.02,
-        "Pneumonia": 76.80, "Pneumothorax": 93.71, "Consolidation": 80.07,
+        "Infiltration": 73.45, "Mass": 86.76, "Nodule": 78.02,
+        "Pneumonia": 76.80, "Pneumothorax": 88.87, "Consolidation": 79.01,
         "Edema": 88.78, "Emphysema": 93.71, "Fibrosis": 80.47,
         "Pleural_Thickening": 80.62, "Hernia": 91.64,
     }
@@ -541,7 +540,7 @@ weights and fine-tuned with a task-specific classification head
 Our best configuration uses:
 \begin{{itemize}}
     \item \textbf{{Backbone:}} {escape_latex(backbone)} (ImageNet pretrained)
-    \item \textbf{{Optimizer:}} {'AdamW~\\cite{loshchilov2017decoupled}' if 'adamw' in loss or 'adamw' in str(config.get('recipe', '')) else 'Adam'} with cosine annealing and linear warmup
+    \item \textbf{{Optimizer:}} {'AdamW~\\cite{loshchilov2017decoupled}' if 'adamw' in str(config.get('extras', '')) or 'adamw' in str(config.get('recipe', '')) or 'adamw' in str(best_desc) else 'Adam'} with cosine annealing and linear warmup
     \item \textbf{{Loss:}} {loss_display}{' with class-frequency weighting' if task == 'multilabel' else ''}
     \item \textbf{{Augmentation:}} Random horizontal flip, rotation ($\\pm 10^\\circ$), color jitter
     \item \textbf{{Precision:}} Mixed FP16 with gradient scaling
@@ -679,10 +678,16 @@ M.~Raghu, C.~Zhang, J.~Kleinberg, and S.~Bengio.
 \newblock Transfusion: Understanding transfer learning for medical imaging.
 \newblock In \textit{{NeurIPS}}, 2019.
 
+\bibitem{{yao2017learning}}
+L.~Yao, E.~Poblenz, D.~Dagunts, B.~Covington, D.~Bernard, and K.~Lyman.
+\newblock Learning to diagnose from scratch by exploiting dependencies among
+labels.
+\newblock \textit{{arXiv preprint arXiv:1710.10501}}, 2017.
+
 \bibitem{{{dataset_short}_dataset}}
 NIH Clinical Center.
 \newblock {escape_latex(dataset_name)} dataset.
-\newblock Available on Kaggle.
+\newblock Available via the NIH and on Kaggle.
 
 \end{{thebibliography}}
 
