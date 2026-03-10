@@ -93,7 +93,7 @@ def apply_recipe(recipe):
     global AUG_HORIZONTAL_FLIP, AUG_VERTICAL_FLIP, AUG_ROTATION_DEGREES
     global AUG_COLOR_JITTER, AUG_COLOR_JITTER_BRIGHTNESS, AUG_COLOR_JITTER_CONTRAST
     global AUG_USE_CLAHE
-    global GRAD_ACCUM_STEPS, USE_EMA, EMA_DECAY, USE_TTA, USE_MIXUP, MIXUP_ALPHA
+    global GRAD_ACCUM_STEPS, USE_EMA, EMA_DECAY, USE_MIXUP, MIXUP_ALPHA
     global USE_GRADUAL_UNFREEZE, UNFREEZE_AFTER_RATIO, DISCRIMINATIVE_LR, BACKBONE_LR_FACTOR
     global GRAD_CLIP_NORM, COMPUTE_CI, CI_BOOTSTRAPS
     global ELASTIC_TRANSFORM, GRID_DISTORTION, COARSE_DROPOUT, COARSE_DROPOUT_RATIO
@@ -153,7 +153,6 @@ def apply_recipe(recipe):
         GRAD_ACCUM_STEPS = advanced.get("grad_accum_steps", GRAD_ACCUM_STEPS)
         USE_EMA = advanced.get("ema", USE_EMA)
         EMA_DECAY = advanced.get("ema_decay", EMA_DECAY)
-        USE_TTA = advanced.get("tta", USE_TTA)
         USE_MIXUP = advanced.get("mixup", USE_MIXUP)
         MIXUP_ALPHA = advanced.get("mixup_alpha", MIXUP_ALPHA)
         USE_GRADUAL_UNFREEZE = advanced.get("gradual_unfreeze", USE_GRADUAL_UNFREEZE)
@@ -256,7 +255,6 @@ AUG_USE_CLAHE = False
 GRAD_ACCUM_STEPS = 1          # gradient accumulation steps
 USE_EMA = False               # exponential moving average of model weights
 EMA_DECAY = 0.999             # EMA decay rate
-USE_TTA = False               # test-time augmentation (horizontal flip)
 USE_MIXUP = False             # MixUp regularization
 MIXUP_ALPHA = 0.2             # MixUp interpolation strength
 USE_GRADUAL_UNFREEZE = False  # freeze backbone initially, then unfreeze
@@ -369,13 +367,14 @@ def summarize_augmentations():
     return ",".join(flags) if flags else "none"
 
 
-def current_results_metadata(cfg, loss_type):
+def current_results_metadata(cfg, loss_type, task="classification"):
+    batch_size = SEG_BATCH_SIZE if task == "segmentation" else BATCH_SIZE
     return {
         "session": CURRENT_RUN_SESSION or "",
         "optimizer": OPTIMIZER,
         "loss": loss_type,
         "image_size": str(get_image_size(cfg)),
-        "batch_size": str(BATCH_SIZE),
+        "batch_size": str(batch_size),
         "learning_rate": f"{LEARNING_RATE:.8g}",
         "weight_decay": f"{WEIGHT_DECAY:.8g}",
         "dropout": f"{DROPOUT:.4f}",
@@ -1864,8 +1863,6 @@ def main():
         print(f"MixUp enabled (alpha={MIXUP_ALPHA})")
     if USE_CUTMIX:
         print(f"CutMix enabled (alpha={CUTMIX_ALPHA})")
-    if USE_TTA:
-        print("TTA enabled (horizontal flip)")
     if LR_SCHEDULE != "cosine":
         print(f"LR schedule: {LR_SCHEDULE}")
 
@@ -2166,7 +2163,7 @@ def main():
             "time_budget_seconds": RUN_TIME_BUDGET,
             "selection_split": "val",
             "image_size": get_image_size(cfg),
-            "ema": USE_EMA, "tta": USE_TTA, "mixup": USE_MIXUP,
+            "ema": USE_EMA, "mixup": USE_MIXUP,
             "cutmix": USE_CUTMIX, "swa": USE_SWA,
             "llrd": USE_LLRD, "llrd_decay": LLRD_DECAY,
             "lr_schedule": LR_SCHEDULE,
@@ -2204,7 +2201,7 @@ def main():
         status="candidate",
         checkpoint_path=checkpoint_path,
         description=build_run_description(dataset, cfg, args.recipe, backbone_name, loss_type),
-        metadata=current_results_metadata(cfg, loss_type),
+        metadata=current_results_metadata(cfg, loss_type, task=task),
     )
 
 
