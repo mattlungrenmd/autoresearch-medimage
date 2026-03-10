@@ -1,5 +1,5 @@
 """
-Autoresearch-MedVision training script.
+autoresearch-medimage training script.
 
 This is the experiment surface for the Karpathy-style inner loop:
 - fixed time budget
