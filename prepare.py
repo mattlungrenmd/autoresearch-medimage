@@ -501,7 +501,7 @@ def download_kaggle_dataset(slug, dest_dir):
 
 
 def download_dataset(dataset_name, refresh_splits=False):
-    """Download a specific medical imaging dataset from Kaggle."""
+    """Download a built-in dataset or prepare an existing local copy."""
     if dataset_name not in DATASETS:
         validation = validate_custom_dataset(dataset_name)
         if validation.get("errors"):
@@ -525,11 +525,14 @@ def download_dataset(dataset_name, refresh_splits=False):
     cfg = DATASETS[dataset_name]
     dest_dir = os.path.join(DATA_DIR, dataset_name)
     marker = os.path.join(dest_dir, ".download_complete")
-    dataset_present = os.path.exists(marker)
+    dataset_present = os.path.exists(marker) or has_local_dataset_contents(dest_dir, dataset_name)
 
     print(f"Downloading {dataset_name}: {cfg['description']}")
     if dataset_present:
-        print(f"  Found existing local dataset at {dest_dir}; skipping Kaggle download.")
+        if os.path.exists(marker):
+            print(f"  Found existing downloaded dataset at {dest_dir}; skipping Kaggle download.")
+        else:
+            print(f"  Found existing local dataset contents at {dest_dir}; skipping Kaggle download.")
     else:
         check_kaggle_credentials()
         download_kaggle_dataset(cfg["kaggle_slug"], dest_dir)
@@ -576,6 +579,44 @@ def _find_dir(base_dir, dirname):
         if dirname in dirs:
             return os.path.join(root, dirname)
     return None
+
+
+def _dir_has_visible_contents(base_dir, ignored_names=None):
+    """Return True when a directory contains visible files or folders."""
+    if not os.path.isdir(base_dir):
+        return False
+
+    ignored = set(ignored_names or [])
+    for root, dirs, files in os.walk(base_dir):
+        visible_dirs = [d for d in dirs if not d.startswith(".") and d not in ignored]
+        visible_files = [f for f in files if not f.startswith(".") and f not in ignored]
+        if visible_dirs or visible_files:
+            return True
+    return False
+
+
+def has_local_dataset_contents(dest_dir, dataset_name):
+    """Heuristic to detect a user-provided local copy of a built-in dataset."""
+    ignored = {".download_complete", "splits.csv"}
+    if not os.path.isdir(dest_dir):
+        return False
+
+    if os.path.exists(os.path.join(dest_dir, "splits.csv")):
+        return True
+
+    if dataset_name == "chestxray14":
+        signatures = [
+            _find_file(dest_dir, "Data_Entry_2017.csv"),
+            _find_file(dest_dir, "Data_Entry_2017_v2020.csv"),
+            _find_file(dest_dir, "train_val_list.txt"),
+            _find_file(dest_dir, "test_list.txt"),
+            _find_dir(dest_dir, "images"),
+            _find_dir(dest_dir, "images_001"),
+        ]
+        if any(signatures):
+            return True
+
+    return _dir_has_visible_contents(dest_dir, ignored_names=ignored)
 
 
 def _prepare_aptos(dest_dir, split_file):

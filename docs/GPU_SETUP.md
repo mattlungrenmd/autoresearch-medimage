@@ -4,15 +4,27 @@
 
 ### Google Colab (Free Tier)
 - **GPU**: T4 (16GB VRAM) — free, limited hours
+- **Best path**: open `notebooks/colab_quickstart.ipynb` for the public, no-auth flow
 - **Setup**:
 ```python
-# In a Colab notebook:
-!git clone https://github.com/<your-username>/autoresearch-medimage
-%cd autoresearch-medimage
-!pip install -e .
-!python prepare.py --dataset chest_xray
-!python train.py --recipe chest_xray_pneumonia --save-checkpoint
+# In a Colab notebook (public repo, no GitHub token needed):
+!curl -LsSf https://astral.sh/uv/install.sh | sh
+import os
+os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH"]
+
+!rm -rf /content/autoresearch-medimage /content/autoresearch-medimage-main /content/repo.zip
+!wget -q https://github.com/mlungrengmail/autoresearch-medimage/archive/refs/heads/main.zip -O /content/repo.zip
+!unzip -q /content/repo.zip -d /content
+!mv /content/autoresearch-medimage-main /content/autoresearch-medimage
+%cd /content/autoresearch-medimage
+!uv sync
+
+# Fastest trial run:
+!uv run prepare.py --dataset toy_binary
+!uv run train.py --recipe toy_binary_smoke --time-budget 5
 ```
+- **No private setup**: no GitHub token, SSH key, or local install required once the repo is public
+- **Bring your own data**: upload a zip to Colab or mount Drive, then run `uv run prepare.py --data /content/my_images`
 - **Limits**: ~4 hrs/day GPU, sessions disconnect after idle
 
 ### Kaggle Notebooks (Free Tier)
