@@ -6,7 +6,7 @@ dataset. The winning configuration then informs a full-scale training run.
 
 ## Setup
 
-Before starting experiments, work with the user to:
+Before starting the search phase, work with the user to:
 
 1. validate or prepare the dataset with `uv run prepare.py --dataset <name>`
 2. use a dedicated run branch if git workflows are available
@@ -38,20 +38,56 @@ For multi-hour sessions:
 - prefer a concrete stop condition such as "50 completed experiments after the session baseline"
 - tell the agent not to send a final summary before that stop condition unless it hits a real blocker
 
-## Boundaries
-
-- `prepare.py` is fixed during research
-- `train.py` is the only experiment surface
-- built-in recipes are baselines and examples
-- custom datasets are first-class through the dataset contract under `data/<dataset>/`
-- paper and regulatory generators produce real first drafts from experiment data, run after the loop
-- `tools/finalize_run.py` can regenerate the end-of-run artifacts after an overnight session
-
 ## Full Training
 
 Once the search converges on a winning configuration, train to convergence
 with `--time-budget` set to the full compute budget. Generate paper and
 regulatory artifacts from the final checkpoint with `tools/finalize_run.py`.
+
+## Boundaries
+
+- `prepare.py` is fixed during the search phase
+- `train.py` is the only experiment surface
+- built-in recipes are baselines and examples
+- custom datasets are first-class through the dataset contract under `data/<dataset>/`
+- paper and regulatory generators produce real first drafts from experiment data, run after the search phase
+- `tools/finalize_run.py` regenerates end-of-search artifacts including the winning configuration
+
+## Using With Claude or Codex
+
+### Commands
+
+Built-in hello-world:
+
+```bash
+uv run prepare.py --dataset chestxray14
+uv run train.py --recipe chexnet --save-checkpoint
+```
+
+Custom dataset:
+
+```bash
+uv run prepare.py --dataset your_dataset
+uv run train.py --dataset your_dataset
+```
+
+Smoke test:
+
+```bash
+uv run prepare.py --dataset toy_binary
+uv run train.py --recipe toy_binary_smoke --time-budget 5
+```
+
+### Good Prompts
+
+- "Read the repo, validate my dataset contract, then run a baseline."
+- "Use the current best run as the baseline and improve mean AUC without changing `prepare.py`."
+- "Generate a draft paper and regulatory planning documents from the best checkpoint."
+
+### Overnight Runbook
+
+See [docs/OVERNIGHT_CHEXNET_RUN.md](docs/OVERNIGHT_CHEXNET_RUN.md) for the
+complete overnight search session runbook with kickoff prompt.
 
 ## Goal
 

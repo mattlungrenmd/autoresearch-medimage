@@ -85,21 +85,3 @@ When promoting the repo, the strongest story is:
 4. show the experiment ledger entry, checkpoint, and generated figures
 5. explain that users can then swap in their own dataset and objective
 
-## Important Positioning
-
-- The paper generator produces a real draft from experiment data, but requires human review before submission.
-- The regulatory outputs are real planning documents built from actual results, but require review by qualified professionals before any submission.
-- Be explicit that public v1 is optimized for 2D workflows.
-- Pair the CheXNet hello-world with a bring-your-own-data example in the README.
-- The stricter held-out `test` evaluation path is a benchmark/demo refinement, not a ChestXNet-only hardcode in the core training loop.
-
-## Promotion Guidance
-
-For launch materials, treat the eventual CheXNet paper as:
-
-- the hello-world case study
-- proof that the repo can connect data, training, evaluation, and writing
-- a concrete artifact generated from the same run stack users can inspect locally
-
-The broader repo story should still be: use Claude or Codex on your own medical
-imaging dataset, with CheXNet as the first complete example.
