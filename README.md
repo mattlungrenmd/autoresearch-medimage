@@ -46,8 +46,15 @@ and regulatory planning documents. See
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
 
-Run the full search → train → report cycle on a free T4 GPU.
-See [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb).
+Try the public Colab paths on a free T4 GPU:
+
+- [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb) for the
+  smoke test and bring-your-own-data flow
+- [notebooks/colab_chexnet.ipynb](notebooks/colab_chexnet.ipynb) for the
+  ChestX-ray14 `chexnet` demo using a local folder or archive you already have
+
+Both notebooks pull a public repo snapshot into `/content`. No local setup,
+GitHub token, or private-repo access is required once the repo is public.
 
 ## Smoke Test (no GPU, no download)
 
