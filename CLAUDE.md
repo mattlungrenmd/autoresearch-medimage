@@ -14,7 +14,7 @@ The core contract:
 - `results.tsv` is the untracked experiment ledger
 
 Workflow: **search** (50-100 quick experiments) → **train** (winning config,
-full compute budget) → **report** (paper and regulatory artifacts).
+full compute budget) → **report** (paper and figures from the final model).
 
 Public v1 scope: 2D classification, 2D multilabel classification, binary
 segmentation.
@@ -55,5 +55,4 @@ During the search phase:
 
 - do not claim MONAI, 2.5D, 3D, DICOM-series, or volumetric support as current
 - do not treat the generated paper as submission-ready without human revision
-- do not treat the regulatory outputs as real FDA/CE/UKCA submission packs
 - keep CheXNet as the hello-world demo, paired with the bring-your-own-data story

@@ -6,7 +6,6 @@ etc.) so it can be used for a full-scale training run, then regenerates:
 - progress chart
 - held-out test evaluation (if test split exists)
 - manuscript figures and paper
-- regulatory planning documents
 """
 
 import argparse
@@ -103,7 +102,6 @@ def main():
     parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--progress-output", type=str, default=None, help="Optional progress PNG path")
     parser.add_argument("--paper-output", type=str, default=None, help="Optional paper .tex output path")
-    parser.add_argument("--reg-output-dir", type=str, default=None, help="Optional regulatory output directory")
     parser.add_argument("--compile-paper", action="store_true", help="Attempt LaTeX compilation if pdflatex is available")
     args = parser.parse_args()
 
@@ -121,10 +119,6 @@ def main():
         args.paper_output or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_overnight.tex")
     )
     final_eval_output = os.path.abspath(os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_final_eval.pt"))
-    reg_output_dir = os.path.abspath(
-        args.reg_output_dir or os.path.join(REPO_DIR, "regulatory", "generated", f"{dataset_name}_overnight")
-    )
-
     python_exe = sys.executable
 
     run_command(
@@ -193,21 +187,6 @@ def main():
     if args.compile_paper:
         paper_cmd.append("--compile")
     run_command(paper_cmd, REPO_DIR)
-
-    run_command(
-        [
-            python_exe,
-            os.path.join(REPO_DIR, "regulatory", "generate_regulatory.py"),
-            "--results",
-            os.path.abspath(args.results),
-            "--dataset",
-            dataset_name,
-            "--output-dir",
-            reg_output_dir,
-            *(["--session", session_name] if session_name else []),
-        ],
-        REPO_DIR,
-    )
 
     # --- Winning configuration summary ---
     # Try checkpoint config first, fall back to results.tsv columns
@@ -291,7 +270,6 @@ def main():
         print(f"  final eval: {final_eval_output}")
     print(f"  figures:    {figures_dir}")
     print(f"  paper:      {paper_output}")
-    print(f"  regulatory: {reg_output_dir}")
 
 
 if __name__ == "__main__":

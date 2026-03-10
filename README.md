@@ -9,7 +9,7 @@ configuration for full-scale training.
 ```
 1. Search   — agent runs 50-100 quick experiments (5 min each)
 2. Train    — winning configuration trains to convergence
-3. Report   — paper and regulatory docs from the final model
+3. Report   — paper and figures from the final model
 ```
 
 ## Quick Start: Your Dataset
@@ -38,8 +38,8 @@ uv run train.py --recipe chexnet --save-checkpoint
 uv run python tools/finalize_run.py --dataset chestxray14
 ```
 
-The finalize step evaluates on held-out test, generates figures, a paper draft,
-and regulatory planning documents. See
+The finalize step evaluates on held-out test, generates figures, and a paper
+draft. See
 [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the full walkthrough.
 
 ## Google Colab
@@ -90,7 +90,7 @@ program.md  — agent instructions for the search loop
 
 The agent modifies only `train.py` during the search phase. Once search
 converges, `tools/finalize_run.py` outputs the winning configuration and
-generates paper and regulatory artifacts.
+generates paper and figure artifacts.
 
 See [program.md](program.md) for the full agent workflow.
 

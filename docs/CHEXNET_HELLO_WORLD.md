@@ -11,7 +11,6 @@ the end-to-end demo that proves the repo can:
 - save a checkpoint
 - separate inner-loop model selection from final held-out reporting
 - generate a draft paper from run results
-- generate regulatory planning documents
 
 That makes it the right example to reference when promoting the repo publicly.
 
@@ -67,12 +66,6 @@ Generate the progress plot for the overnight or multi-experiment run:
 
 ```bash
 uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
-```
-
-Generate the regulatory planning documents:
-
-```bash
-uv run regulatory/generate_regulatory.py --dataset chestxray14 --output-dir regulatory/generated/chexnet_hello_world
 ```
 
 ## What To Show Publicly
