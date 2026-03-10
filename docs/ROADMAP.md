@@ -1,59 +1,77 @@
 # Roadmap
 
-This roadmap is scoped to the public release of `autoresearch-medimage` as an
-agent-first medical imaging research framework.
+This repo is the autonomous experiment runner that sits on top of training
+frameworks — not a framework competing with MONAI, nnU-Net, or HuggingFace.
 
-## v1.0 — Public Preview
+The roadmap reflects that: improvements focus on making the search loop
+smarter, the handoff to production cleaner, and the integration with the
+existing ecosystem tighter.
 
-Status: current release
+## v1.0 — Public Preview (current)
 
-- agent-first workflow centered on Claude/Codex editing `train.py`
-- built-in datasets plus bring-your-own-data via `data/<dataset>/dataset.yaml`
-- auto-detect task type from local dataset directories (`prepare.py --data /path`)
-- fixed 300-second experiment budget and `results.tsv` experiment ledger
-- 2D classification, multilabel classification, and binary segmentation
-- advanced training features: EMA, CutMix, MixUp, LLRD, SWA, knowledge distillation, ordinal regression
-- Kaggle dataset auto-detection (`tools/kaggle_autodetect.py`)
-- paper tracker for monitoring new publications (`tools/paper_tracker.py`)
-- paper and regulatory document generators (real first drafts from experiment data)
-- CheXNet as the documented hello-world, not the only supported workflow
+The search → train → report loop works end-to-end for 2D tasks.
 
-## v1.1 — Extended Benchmarks and Export
+- agent-first workflow: Claude/Codex edits `train.py`, follows `program.md`
+- bring-your-own-data via `data/<dataset>/dataset.yaml` or auto-detect
+- fixed 300-second experiment budget, `results.tsv` ledger, session isolation
+- 2D classification, multilabel classification, binary segmentation
+- 13 recipes, 7 built-in datasets, Colab notebook
+- winning configuration output at end of search
+- paper and regulatory document generators from experiment data
 
-Status: next milestone
+## v1.1 — Smarter Search
 
-| Capability | Notes |
+Make the agent find better models faster.
+
+| Capability | Why it matters |
 |---|---|
-| MedMNIST integration | Register 18 standardized benchmarks as built-in datasets |
-| ONNX export tool | Export trained models for deployment |
-| Richer dataset validation | Template generation, objective templates |
-| Stronger run metadata | Experiment descriptions and run metadata capture |
-| Lightweight CI | Smoke-test fixtures around the data contract |
+| Search history awareness | Agent reads past experiments to avoid repeating failed ideas |
+| Bayesian-style next-experiment suggestion | Reduce wasted experiments on unpromising regions |
+| External validation split | Auto-hold a site/scanner cohort for generalization testing |
+| Configurable time budgets per phase | Quick sweeps early, longer runs for promising configs |
+| Lightweight CI | Smoke-test fixtures to catch data contract regressions |
 
-## v2.0 — Ecosystem Integration
+## v1.2 — Production Handoff
 
-Status: planned
+Make the winning model deployable.
 
-| Capability | Notes |
+| Capability | Why it matters |
 |---|---|
-| HuggingFace model upload | Model card generation + checkpoint push to Hub |
-| Automated arXiv pipeline | End-to-end paper generation from run artifacts |
-| Multi-GPU / distributed | DDP wrapper for parallel training |
-| Richer paper generation | Multi-experiment comparison tables, auto-figure selection |
-| Regulatory evidence tracking | Automated evidence-gap closure from run artifacts |
+| ONNX export of winning checkpoint | Standard interchange format for inference runtimes |
+| Model card generation | Document what the model does, how it was validated, and its limits |
+| HuggingFace Hub push | One command to publish the winning model with card and weights |
+| Reproducibility manifest | Lock exact versions, seeds, and config for the winning run |
 
-## v3.0 — MONAI Backend
+## v2.0 — Ecosystem Backends
 
-Status: planned
+Use the best tools for each task, not just the built-in training loop.
 
-- optional MONAI backend for DICOM/NIfTI workflows
-- 2.5D and 3D volume training
-- study/series-level data handling
-- multislice and patch-based inference flows
+| Capability | Why it matters |
+|---|---|
+| MONAI transforms and data loading | Leverage MONAI's medical-grade preprocessing (resampling, windowing, bias correction) while keeping the search loop |
+| nnU-Net as a search backend | Self-configuring segmentation pipeline as one of the experiment options |
+| Foundation model fine-tuning recipes | Systematic search over adaptation strategies for BiomedCLIP, RETFound, etc. |
+| Vision-language model integration | Search over VLM fine-tuning for medical tasks — Phi-4V, MedImageInsight, MedGemma, and other open-source medical VLMs |
+| 2.5D and 3D volume support | Extend the search loop to CT/MR volumes via backend integration |
 
-## Non-Goals for Public v1
+## v3.0 — Clinical Readiness
 
-- general-purpose all-modality medical imaging support
-- submission-ready FDA, CE, or UKCA documentation
-- autonomous publication pipelines
-- multi-GPU orchestration and distributed training
+Bridge the gap between research search and clinical deployment.
+
+| Capability | Why it matters |
+|---|---|
+| DICOM-native data loading | Read directly from DICOM studies, not just PNGs |
+| DICOMweb integration | Pull studies from PACS/VNA for training and push results back |
+| Structured result output | Write model predictions as DICOM SR/SEG for clinical workflow integration |
+| Drift monitoring scaffold | Track post-deployment performance against the validation baseline |
+| Regulatory evidence tracking | Map experiment artifacts to FDA/CE/UKCA evidence requirements |
+
+## Non-Goals
+
+These are outside the repo's purpose:
+
+- becoming a training framework (that's MONAI, nnU-Net, HuggingFace)
+- replacing clinical deployment platforms (that's MONAI Deploy, Clara)
+- submission-ready regulatory documentation (the generators produce drafts)
+- autonomous publication without human review
+- general-purpose all-modality support without backend integration
