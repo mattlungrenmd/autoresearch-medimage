@@ -66,7 +66,7 @@ RANDOM_SEED = 42            # reproducible splits
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".pgm"}
 DICOM_EXTENSIONS = {".dcm", ".dicom"}
 
 # ---------------------------------------------------------------------------
@@ -1780,7 +1780,10 @@ def _stratified_split(df, val_ratio=VAL_RATIO, seed=RANDOM_SEED):
     """Standard stratified train/val split."""
     df = df.copy()
     if "label" in df.columns and df["label"].nunique() >= 2:
-        skf = StratifiedKFold(n_splits=max(2, int(1 / val_ratio)), shuffle=True, random_state=seed)
+        desired_splits = int(1 / val_ratio)
+        min_class_count = df["label"].value_counts().min()
+        n_splits = max(2, min(desired_splits, min_class_count))
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
         df["split"] = "train"
         _, val_idx = next(skf.split(df, df["label"]))
         df.loc[df.index[val_idx], "split"] = "val"
