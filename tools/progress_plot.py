@@ -8,6 +8,8 @@ analysis.ipynb to the medical-imaging results ledger used in this repo.
 import argparse
 import os
 
+os.environ["MPLBACKEND"] = "Agg"
+
 import matplotlib.pyplot as plt
 import pandas as pd
 
