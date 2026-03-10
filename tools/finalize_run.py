@@ -1,10 +1,12 @@
 """
-Finalize an autoresearch run by regenerating the main artifacts.
+Finalize an autoresearch search session.
 
-This is intended for the end of an overnight session:
+Prints the winning configuration (backbone, optimizer, LR, augmentations,
+etc.) so it can be used for a full-scale training run, then regenerates:
 - progress chart
-- paper scaffold
-- regulatory scaffolds
+- held-out test evaluation (if test split exists)
+- manuscript figures and paper
+- regulatory planning documents
 """
 
 import argparse
@@ -207,18 +209,88 @@ def main():
         REPO_DIR,
     )
 
-    print("Finalized run artifacts:")
-    print(f"  dataset: {dataset_name}")
+    # --- Winning configuration summary ---
+    # Try checkpoint config first, fall back to results.tsv columns
+    ckpt_config = {}
+    ckpt_path = str(winner.get("checkpoint_path", "")).strip()
+    if ckpt_path and ckpt_path.lower() != "nan" and os.path.exists(ckpt_path):
+        try:
+            import torch
+            payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            ckpt_config = payload.get("config", {})
+        except Exception:
+            pass
+
+    def _cfg(key, fallback_key=None):
+        val = ckpt_config.get(key, "")
+        if not val and fallback_key:
+            val = str(winner.get(fallback_key, "")).strip()
+        if not val:
+            val = str(winner.get(key, "")).strip()
+        if val and val.lower() != "nan":
+            return val
+        return ""
+
+    print("=" * 60)
+    print("WINNING CONFIGURATION")
+    print("=" * 60)
+    print(f"  dataset:       {dataset_name}")
     if session_name:
-        print(f"  session: {session_name}")
-    print(f"  best metric: {winner.get('metric_name', 'metric')}={winner.get('metric', '')}")
-    print(f"  status basis: {'keep' if 'status' in selected.columns and (selected['status'] == 'keep').any() else 'candidate'}")
-    print(f"  checkpoint: {winner.get('checkpoint_path', '')}")
-    print(f"  progress: {progress_output}")
+        print(f"  session:       {session_name}")
+    print(f"  best metric:   {winner.get('metric_name', 'metric')} = {winner.get('metric', '')}")
+    if final_eval_output:
+        print(f"  held-out test: (see {os.path.basename(final_eval_output)})")
+    print()
+    backbone = _cfg("backbone")
+    if backbone:
+        print(f"  backbone:      {backbone}")
+    optimizer = _cfg("optimizer")
+    if optimizer:
+        print(f"  optimizer:     {optimizer}")
+    lr = _cfg("learning_rate")
+    if lr:
+        print(f"  learning_rate: {lr}")
+    wd = _cfg("weight_decay")
+    if wd:
+        print(f"  weight_decay:  {wd}")
+    bs = _cfg("batch_size")
+    if bs:
+        print(f"  batch_size:    {bs}")
+    loss = _cfg("loss")
+    if loss:
+        print(f"  loss:          {loss}")
+    dropout = _cfg("dropout")
+    if dropout:
+        print(f"  dropout:       {dropout}")
+    img_size = _cfg("image_size")
+    if img_size:
+        print(f"  image_size:    {img_size}")
+    augmentations = _cfg("augmentations")
+    if augmentations:
+        print(f"  augmentations: {augmentations}")
+
+    # Advanced features
+    advanced = []
+    for feat in ["ema", "tta", "mixup", "cutmix", "swa", "llrd"]:
+        val = ckpt_config.get(feat)
+        if val:
+            advanced.append(feat.upper())
+    if advanced:
+        print(f"  advanced:      {', '.join(advanced)}")
+
+    print()
+    print(f"  checkpoint:    {ckpt_path}")
+    print()
+    print("To train this configuration to convergence:")
+    print(f"  uv run train.py --dataset {dataset_name} --time-budget <seconds> --save-checkpoint")
+    print()
+    print("-" * 60)
+    print("Generated artifacts:")
+    print(f"  progress:   {progress_output}")
     if final_eval_output:
         print(f"  final eval: {final_eval_output}")
-    print(f"  figures: {figures_dir}")
-    print(f"  paper: {paper_output}")
+    print(f"  figures:    {figures_dir}")
+    print(f"  paper:      {paper_output}")
     print(f"  regulatory: {reg_output_dir}")
 
 
