@@ -42,7 +42,7 @@ For multi-hour sessions:
 
 Once the search converges on a winning configuration, train to convergence
 with `--time-budget` set to the full compute budget. Generate paper and
-regulatory artifacts from the final checkpoint with `tools/finalize_run.py`.
+paper artifacts from the final checkpoint with `tools/finalize_run.py`.
 
 ## Boundaries
 
@@ -50,7 +50,7 @@ regulatory artifacts from the final checkpoint with `tools/finalize_run.py`.
 - `train.py` is the only experiment surface
 - built-in recipes are baselines and examples
 - custom datasets are first-class through the dataset contract under `data/<dataset>/`
-- paper and regulatory generators produce real first drafts from experiment data, run after the search phase
+- paper generator produces a real first draft from experiment data, run after the search phase
 - `tools/finalize_run.py` regenerates end-of-search artifacts including the winning configuration
 
 ## Using With Claude or Codex
@@ -82,7 +82,7 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 - "Read the repo, validate my dataset contract, then run a baseline."
 - "Use the current best run as the baseline and improve mean AUC without changing `prepare.py`."
-- "Generate a draft paper and regulatory planning documents from the best checkpoint."
+- "Generate a draft paper from the best checkpoint."
 
 ### Overnight Runbook
 
@@ -104,5 +104,5 @@ train it to convergence.
 
 - MONAI backend
 - multislice / 2.5D / 3D support
-- submission-ready regulatory documents
+- submission-ready publications
 - automatic publication pipelines

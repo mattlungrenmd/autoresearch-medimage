@@ -12,7 +12,6 @@ with:
 - an updated `results.tsv`
 - a `progress.png` plot
 - an updated paper generated from results with a held-out `test` result
-- updated regulatory planning documents
 
 ## Preconditions
 
@@ -113,7 +112,6 @@ End-of-run steps:
   - generated progress plot path
   - generated paper path
   - generated figures path
-  - generated regulatory output path
 
 Begin now.
 ```
@@ -154,6 +152,5 @@ By default the finalize step refreshes:
 - `paper/generated/chestxray14_final_eval.pt`
 - `paper/generated/chestxray14_figures/`
 - `paper/generated/chestxray14_overnight.tex`
-- `regulatory/generated/chestxray14_overnight/`
 
 Those are the main artifacts to review in the morning.

@@ -68,7 +68,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 
 ### AWS/GCP/Azure
 - Spot instances for cheaper rates
-- Best for production/regulatory work
+- Best for production workloads
 
 ## Recommended GPU by Task
 

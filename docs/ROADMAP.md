@@ -17,7 +17,7 @@ The search → train → report loop works end-to-end for 2D tasks.
 - 2D classification, multilabel classification, binary segmentation
 - 13 recipes, 7 built-in datasets, Colab notebook
 - winning configuration output at end of search
-- paper and regulatory document generators from experiment data
+- paper generator from experiment data
 
 ## v1.1 — Smarter Search
 
@@ -64,7 +64,6 @@ Bridge the gap between research search and clinical deployment.
 | DICOMweb integration | Pull studies from PACS/VNA for training and push results back |
 | Structured result output | Write model predictions as DICOM SR/SEG for clinical workflow integration |
 | Drift monitoring scaffold | Track post-deployment performance against the validation baseline |
-| Regulatory evidence tracking | Map experiment artifacts to FDA/CE/UKCA evidence requirements |
 
 ## Non-Goals
 
@@ -72,6 +71,5 @@ These are outside the repo's purpose:
 
 - becoming a training framework (that's MONAI, nnU-Net, HuggingFace)
 - replacing clinical deployment platforms (that's MONAI Deploy, Clara)
-- submission-ready regulatory documentation (the generators produce drafts)
 - autonomous publication without human review
 - general-purpose all-modality support without backend integration
