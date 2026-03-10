@@ -51,7 +51,7 @@ The recommended evaluation protocol is the paper-grade split protocol:
 Use this as the starting prompt for Claude or Codex:
 
 ```text
-Read README.md, CLAUDE.md, prepare.py, train.py, program.md, docs/CHEXNET_HELLO_WORLD.md, docs/OVERNIGHT_CHEXNET_RUN.md, and results.tsv.
+Read README.md, CLAUDE.md, prepare.py, train.py, program.md, docs/CHEXNET_HELLO_WORLD.md, and results.tsv.
 
 We are running an overnight Karpathy-style autoresearch session on chestxray14 in this isolated workspace.
 
@@ -67,7 +67,7 @@ Improve the kept chestxray14 validation mean_auc over an overnight run on the lo
 
 Hard rules:
 - Do not modify prepare.py.
-- Only modify train.py during the experiment loop.
+- Only modify train.py during the search phase.
 - Pass --session chexnet_overnight_20260310 on every training run.
 - Do not use the held-out test split to rank experiments.
 - Do not use literature numbers for keep/discard decisions.

@@ -3,7 +3,7 @@ Paper generator for autoresearch-medimage.
 
 Generates a draft LaTeX manuscript from results.tsv, checkpoint metadata,
 and final evaluation artifacts. The output is a real first draft — not a
-scaffold or placeholder — built from actual experiment data.
+built from actual experiment data.
 
 Usage:
     uv run paper/generate_paper.py --dataset chestxray14
@@ -574,7 +574,7 @@ improving baseline.
 {figure_section}
 
 \section{{Discussion}}
-The autonomous experiment loop explored multiple architectures, optimizers,
+The autonomous search phase explored multiple architectures, optimizers,
 and augmentation strategies within the fixed time budget constraint. This
 approach trades the depth of individual training runs for breadth of
 exploration, which is well-suited to the early stages of model development

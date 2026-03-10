@@ -4,7 +4,7 @@ Regulatory planning document generator for autoresearch-medimage.
 Generates FDA 510(k), CE/EU MDR, and UKCA planning documents from actual
 experiment results, checkpoint metadata, and software environment information.
 
-These documents are real planning tools — not scaffolds or placeholders. They
+These documents are real planning tools built from actual experiment data. They
 pull actual performance data, software versions, and model configuration from
 the winning checkpoint. They still require review by qualified regulatory
 professionals before any submission.

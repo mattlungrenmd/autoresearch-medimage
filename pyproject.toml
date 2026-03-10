@@ -1,7 +1,7 @@
 [project]
 name = "autoresearch-medimage"
 version = "0.1.0"
-description = "Autonomous AI research for medical image classification and segmentation"
+description = "Autonomous medical imaging AI research — bring any dataset, the agent finds the optimal model"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 
