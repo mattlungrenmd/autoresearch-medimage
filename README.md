@@ -4,8 +4,7 @@ You have medical images. This repo finds the optimal model for your task.
 
 An AI agent runs fast, fixed-budget experiments — testing backbones,
 hyperparameters, and augmentation strategies — then outputs the winning
-configuration for full-scale training. Built on
-[karpathy/autoresearch](https://github.com/karpathy/autoresearch).
+configuration for full-scale training.
 
 ```
 1. Search   — agent runs 50-100 quick experiments (5 min each)
@@ -42,6 +41,13 @@ uv run python tools/finalize_run.py --dataset chestxray14
 The finalize step evaluates on held-out test, generates figures, a paper draft,
 and regulatory planning documents. See
 [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the full walkthrough.
+
+## Google Colab
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+
+Run the full search → train → report cycle on a free T4 GPU.
+See [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb).
 
 ## Smoke Test (no GPU, no download)
 
@@ -84,6 +90,12 @@ See [program.md](program.md) for the full agent workflow.
 ## Roadmap
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
+
+## Acknowledgments
+
+Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) —
+the idea that a small, fixed contract (`prepare.py` + `train.py` + `program.md`)
+is enough for an AI agent to run an autonomous research loop.
 
 ## License
 
