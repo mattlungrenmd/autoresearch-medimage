@@ -45,9 +45,13 @@ def load_best_result(results_path, dataset_filter=None, session_filter=None):
     elif session_filter:
         raise ValueError("results.tsv does not contain a 'session' column")
     if "status" in df.columns:
-        keep_like = df[df["status"].isin(["keep", "candidate"])]
-        if not keep_like.empty:
-            df = keep_like
+        keep_rows = df[df["status"] == "keep"]
+        if not keep_rows.empty:
+            df = keep_rows
+        else:
+            candidate_rows = df[df["status"].isin(["keep", "candidate"])]
+            if not candidate_rows.empty:
+                df = candidate_rows
     if df.empty or "metric" not in df.columns:
         return {}
     df["metric"] = pd.to_numeric(df["metric"], errors="coerce")

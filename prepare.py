@@ -26,7 +26,7 @@ Usage:
 
 Requires: ~/.kaggle/kaggle.json with valid API credentials (for Kaggle downloads).
 Datasets are stored in ./data/<dataset_name>/
-Each custom dataset gets a dataset.json manifest for the dynamic registry.
+Each custom dataset gets a dataset.yaml manifest for the dynamic registry.
 """
 
 import os
@@ -2068,10 +2068,9 @@ def prepare_custom_dataset(data_path, task_override=None, config_overrides=None,
     """Auto-detect and prepare any medical imaging dataset.
 
     Scans directory structure, infers task type and metadata, creates
-    train/val splits (patient-level if possible), and writes a dataset.json
+    train/val splits (patient-level if possible), and writes a dataset.yaml
     manifest for the dynamic registry.
     """
-    import json as _json
 
     data_path = os.path.abspath(data_path)
     ds_name = os.path.basename(data_path).replace("-", "_").replace(" ", "_").lower()
@@ -2186,9 +2185,10 @@ def prepare_custom_dataset(data_path, task_override=None, config_overrides=None,
         "metric": metric,
         "description": f"Auto-detected from {data_path}",
     }
-    manifest_path = os.path.join(data_dir, "dataset.json")
+    import yaml as _yaml
+    manifest_path = os.path.join(data_dir, "dataset.yaml")
     with open(manifest_path, "w", encoding="utf-8") as f:
-        _json.dump(manifest, f, indent=2)
+        _yaml.safe_dump(manifest, f, default_flow_style=False, sort_keys=False)
 
     print(f"\nWrote {manifest_path}")
     print(f"\n{'='*60}")
