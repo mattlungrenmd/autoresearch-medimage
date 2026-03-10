@@ -1,12 +1,13 @@
 # Overnight CheXNet Run
 
-This is the runbook for a faithful Karpathy-style overnight session in this
-repo.
+This is the runbook for an overnight search session. The agent runs fast,
+fixed-budget experiments to find the best model backbone and hyperparameters
+for CheXNet. The winning configuration then informs a full-scale training run.
 
 ## Goal
 
-Start a fresh named session, let the agent iterate on `train.py` for 6-8
-hours, and end with:
+Start a fresh named session, let the agent search for 6-8 hours, and end
+with:
 
 - an updated `results.tsv`
 - a `progress.png` plot

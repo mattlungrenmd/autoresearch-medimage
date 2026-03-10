@@ -7,14 +7,22 @@ patient-level splits, DICOM support, and 7 built-in benchmarks. Built on
 
 ## How It Works
 
-Point an AI agent (Claude, Codex) at this repo. The agent edits `train.py`,
-runs fixed-budget experiments, logs results to `results.tsv`, keeps
-improvements, and discards regressions — automatically.
+The agent runs fast, fixed-budget experiments to search for the best model
+backbone, hyperparameters, and augmentation strategy for your dataset. Each
+experiment trains for 5 minutes. The agent keeps improvements, discards
+regressions, and iterates — automatically. The winning configuration then
+informs a full-scale training run.
+
+```
+1. Search   — agent runs 50-100 quick experiments, finds the winning recipe
+2. Train    — take the best config, train to convergence with real compute
+3. Report   — generate paper and regulatory artifacts from the final model
+```
 
 ```
 prepare.py  — dataset download, data loading, evaluation (READ-ONLY for agents)
 train.py    — the experiment surface (agents modify this)
-program.md  — agent instructions for the 3-phase research loop
+program.md  — agent instructions for the research loop
 results.tsv — experiment ledger (auto-generated, not tracked)
 ```
 
@@ -91,11 +99,15 @@ uv run train.py --list-recipes    # list all recipes
 
 ## Agent Workflow
 
-The intended 3-phase loop:
+The search phase runs in three stages:
 
 1. **Architecture sweep** (experiments 1-20): try DenseNet, EfficientNet, ConvNeXt, ViT, Swin
 2. **Hyperparameter tuning** (experiments 20-50): optimize LR, batch size, augmentation on the winning architecture
 3. **Advanced tricks** (experiments 50-100): EMA, CutMix, label smoothing, distillation
+
+Once the search converges, take the winning configuration and train to
+convergence with `--time-budget` set to your full compute budget. Generate the
+paper and regulatory artifacts from the final checkpoint.
 
 See [program.md](program.md) and
 [docs/USING_WITH_CLAUDE_CODEX.md](docs/USING_WITH_CLAUDE_CODEX.md).

@@ -1,15 +1,16 @@
 # Using With Claude or Codex
 
-This repo is meant to feel like Karpathy's `autoresearch`, but for 2D medical
-imaging tasks.
+This repo uses fast, fixed-budget experiments to search for the best model
+configuration for 2D medical imaging tasks. The agent iterates, the winning
+config informs a full-scale training run.
 
 ## Core Pattern
 
 1. Prepare or validate the dataset.
-2. Establish a baseline run.
-3. Let the agent iterate in `train.py`.
-4. Keep or discard experiments based on the metric in `run.log` and
+2. Let the agent search: fast experiments to find the best backbone + hyperparameters.
+3. Keep or discard experiments based on the metric in `run.log` and
    `results.tsv`.
+4. Train the winning config to convergence with a longer `--time-budget`.
 
 ## Commands
 
@@ -39,11 +40,11 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 ## Agent Workflow
 
-- `prepare.py` is fixed during the research loop
+- `prepare.py` is fixed during the search loop
 - `train.py` is the mutation surface
 - `results.tsv` is the untracked experiment ledger
-- each run uses the fixed 300-second budget from `prepare.py`
-- `--time-budget` is available for quick smoke tests, but the canonical loop stays at 300 seconds
+- each search experiment uses the fixed 300-second budget from `prepare.py`
+- `--time-budget` is available for quick smoke tests and for the final full training run
 
 ## Good Prompts
 
@@ -53,10 +54,11 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 ## What The Repo Does Well Today
 
-- short-horizon baseline and improvement loops
+- automated architecture and hyperparameter search via fast experiment loops
 - built-in recipes for a few public medical imaging benchmarks
 - bring-your-own-data for standard 2D tasks
 - checkpoint metadata and experiment logging
+- paper and regulatory document generation from final model
 
 ## What To Treat As Experimental
 
