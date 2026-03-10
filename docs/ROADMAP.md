@@ -12,7 +12,7 @@ Status: current release
 - auto-detect task type from local dataset directories (`prepare.py --data /path`)
 - fixed 300-second experiment budget and `results.tsv` experiment ledger
 - 2D classification, multilabel classification, and binary segmentation
-- advanced training features: EMA, CutMix, MixUp, LLRD, TTA, SWA, knowledge distillation
+- advanced training features: EMA, CutMix, MixUp, LLRD, SWA, knowledge distillation, ordinal regression
 - Kaggle dataset auto-detection (`tools/kaggle_autodetect.py`)
 - paper tracker for monitoring new publications (`tools/paper_tracker.py`)
 - paper and regulatory document generators (real first drafts from experiment data)
