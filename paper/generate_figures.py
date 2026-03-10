@@ -8,6 +8,8 @@ import re
 import sys
 from pathlib import Path
 
+os.environ["MPLBACKEND"] = "Agg"
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

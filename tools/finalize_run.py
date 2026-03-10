@@ -87,7 +87,9 @@ def best_row(df):
 
 
 def run_command(command, workdir):
-    result = subprocess.run(command, cwd=workdir, capture_output=True, text=True)
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    result = subprocess.run(command, cwd=workdir, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed: {' '.join(command)}\n\nSTDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
