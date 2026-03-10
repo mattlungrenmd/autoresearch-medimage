@@ -1,7 +1,8 @@
 # autoresearch-medimage program
 
-This repo follows a Karpathy-style autonomous research loop for medical
-imaging.
+This repo uses fast, fixed-budget experiments to search for the best model
+backbone, hyperparameters, and augmentation strategy for a medical imaging
+dataset. The winning configuration then informs a full-scale training run.
 
 ## Setup
 
@@ -14,9 +15,10 @@ Before starting experiments, work with the user to:
 5. keep experiment output in `run.log`
 6. leave `results.tsv` untracked
 
-## Experiment Loop
+## Search Phase
 
 Each experiment uses the fixed 300-second training budget from `prepare.py`.
+The goal is to find the winning configuration, not to train a production model.
 
 The canonical loop is:
 
@@ -45,10 +47,16 @@ For multi-hour sessions:
 - paper and regulatory generators produce real first drafts from experiment data, run after the loop
 - `tools/finalize_run.py` can regenerate the end-of-run artifacts after an overnight session
 
+## Full Training
+
+Once the search converges on a winning configuration, train to convergence
+with `--time-budget` set to the full compute budget. Generate paper and
+regulatory artifacts from the final checkpoint with `tools/finalize_run.py`.
+
 ## Goal
 
-Improve the dataset's primary metric while preserving a simple and auditable
-workflow.
+Find the best model configuration for the dataset's primary metric, then
+train it to convergence.
 
 ## Public v1 Scope
 

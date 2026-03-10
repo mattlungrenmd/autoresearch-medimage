@@ -2,18 +2,23 @@
 
 ## Purpose
 
-This repo adapts the spirit of `karpathy/autoresearch` to medical imaging.
+This repo uses fast, fixed-budget experiments to search for the best model
+backbone, hyperparameters, and augmentation strategy for a medical imaging
+dataset. The winning configuration then informs a full-scale training run.
 
 The core contract is still intentionally small:
 
 - `prepare.py` is fixed during experiment loops
 - `train.py` is the experiment surface
-- `program.md` describes the autonomous research loop
+- `program.md` describes the search loop
 - `results.tsv` is the untracked experiment ledger
 
+The workflow is: **search** (agent runs 50-100 quick experiments) →
+**train** (winning config, full compute budget) → **report** (paper and
+regulatory artifacts from the final model).
+
 Public v1 is scoped to 2D classification, 2D multilabel classification, and
-binary segmentation. Paper and regulatory generators produce real first drafts
-from experiment data, but are not the main product claim.
+binary segmentation.
 
 ## Current State
 
@@ -81,11 +86,11 @@ uv run paper/generate_paper.py
 uv run regulatory/generate_regulatory.py
 ```
 
-## Overnight Run Pattern
+## Overnight Search Pattern
 
-The repo is designed for agent-driven fixed-budget experiments, but it does not
-ship a detached scheduler that mutates `train.py` without an attached agent
-session.
+The overnight run is the search phase — the agent iterates on `train.py` to
+find the winning configuration. It does not ship a detached scheduler that
+mutates `train.py` without an attached agent session.
 
 For long runs, use an isolated workspace or clone:
 
