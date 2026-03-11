@@ -205,11 +205,14 @@ def main():
     def _cfg(key, fallback_key=None):
         val = ckpt_config.get(key, "")
         if not val and fallback_key:
-            val = str(winner.get(fallback_key, "")).strip()
+            val = winner.get(fallback_key, "")
         if not val:
-            val = str(winner.get(key, "")).strip()
-        if val and val.lower() != "nan":
-            return val
+            val = winner.get(key, "")
+        if val is None or pd.isna(val):
+            return ""
+        text = str(val).strip()
+        if text and text.lower() != "nan":
+            return text
         return ""
 
     print("=" * 60)
