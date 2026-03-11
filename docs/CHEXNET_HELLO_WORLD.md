@@ -14,6 +14,12 @@ the end-to-end demo that proves the repo can:
 
 That makes it the right example to reference when promoting the repo publicly.
 
+For Colab specifically:
+
+- use `notebooks/colab_chexnet.ipynb` for this single-baseline hello-world
+- use `notebooks/colab_autoresearch.ipynb` for a real multi-experiment Colab
+  search session on the same dataset
+
 ## Why CheXNet
 
 CheXNet is a good hello-world because it is:
@@ -42,6 +48,12 @@ Run the baseline:
 
 ```bash
 uv run train.py --recipe chexnet --save-checkpoint
+```
+
+For a real search session instead of one baseline, use a named session:
+
+```bash
+uv run train.py --recipe chexnet --session chestxray14_search_20260311 --save-checkpoint
 ```
 
 Regenerate the end-of-run artifacts, including the held-out `test` evaluation:
@@ -77,4 +89,3 @@ When promoting the repo, the strongest story is:
 3. finalize the run and report the untouched `test` result
 4. show the experiment ledger entry, checkpoint, and generated figures
 5. explain that users can then swap in their own dataset and objective
-

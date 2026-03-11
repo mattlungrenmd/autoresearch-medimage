@@ -4,7 +4,10 @@
 
 ### Google Colab (Free Tier)
 - **GPU**: T4 (16GB VRAM) — free, limited hours
-- **Best path**: open `notebooks/colab_quickstart.ipynb` for the public, no-auth flow
+- **Notebook options**:
+  - `notebooks/colab_quickstart.ipynb` for smoke tests and BYOD
+  - `notebooks/colab_chexnet.ipynb` for one ChestX-ray14 baseline run
+  - `notebooks/colab_autoresearch.ipynb` for a real named multi-experiment search session
 - **Setup**:
 ```python
 # In a Colab notebook (public repo, no GitHub token needed):
@@ -25,6 +28,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 ```
 - **No private setup**: no GitHub token, SSH key, or local install required once the repo is public
 - **Bring your own data**: upload a zip to Colab or mount Drive, then run `uv run prepare.py --data /content/my_images`
+- **Best ChestX-ray14 search pattern**: mount Drive, stage the dataset to local `/content` once, then run a named `--session` with periodic Drive backups
 - **Limits**: ~4 hrs/day GPU, sessions disconnect after idle
 
 ### Kaggle Notebooks (Free Tier)
