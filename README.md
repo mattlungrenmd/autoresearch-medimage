@@ -51,10 +51,15 @@ Try the public Colab paths on a free T4 GPU:
 - [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb) for the
   smoke test and bring-your-own-data flow
 - [notebooks/colab_chexnet.ipynb](notebooks/colab_chexnet.ipynb) for the
-  ChestX-ray14 `chexnet` demo using a local folder or archive you already have
+  ChestX-ray14 single-baseline `chexnet` demo using a local folder or archive
+  you already have
+- [notebooks/colab_autoresearch.ipynb](notebooks/colab_autoresearch.ipynb) for
+  a named multi-experiment ChestX-ray14 search session with Drive sync,
+  keep/discard decisions, and finalization
 
-Both notebooks pull a public repo snapshot into `/content`. No local setup,
-GitHub token, or private-repo access is required once the repo is public.
+All three notebooks pull a public repo snapshot into `/content`. No local
+setup, GitHub token, or private-repo access is required once the repo is
+public.
 
 ## Smoke Test (no GPU, no download)
 

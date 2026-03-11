@@ -4,6 +4,11 @@ This is the runbook for an overnight search session. The agent runs fast,
 fixed-budget experiments to find the best model backbone and hyperparameters
 for CheXNet. The winning configuration then informs a full-scale training run.
 
+If you want the Colab-friendly version of this idea, use
+`notebooks/colab_autoresearch.ipynb`. That notebook runs a named multi-run
+session with Drive-backed state, but stays in recipe space instead of asking a
+browser notebook to mutate `train.py` autonomously.
+
 ## Goal
 
 Start a fresh named session, let the agent search for 6-8 hours, and end
