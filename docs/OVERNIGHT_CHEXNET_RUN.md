@@ -6,8 +6,9 @@ for CheXNet. The winning configuration then informs a full-scale training run.
 
 If you want the Colab-friendly version of this idea, use
 `notebooks/colab_autoresearch.ipynb`. That notebook runs a named multi-run
-session with Drive-backed state, seeds a baseline queue, then keeps mutating
-the current best recipe instead of stopping after a fixed shortlist.
+session with Drive-backed state, seeds a baseline queue, keeps a frontier of
+the best kept runs across multiple backbones, then keeps mutating that
+frontier instead of tunneling on only one recipe.
 
 ## Goal
 
@@ -16,7 +17,8 @@ with:
 
 - an updated `results.tsv`
 - a `progress.png` plot
-- an updated paper generated from results with a held-out `test` result
+- a held-out `test` evaluation for the best kept checkpoint
+- optional paper/helper artifacts only if you explicitly want them
 
 ## Preconditions
 
@@ -46,9 +48,9 @@ uv run train.py --recipe chexnet --session chexnet_overnight_20260310 --save-che
 uv run python tools/mark_result.py --dataset chestxray14 --session chexnet_overnight_20260310 --status keep --append-note "session baseline"
 ```
 
-The recommended evaluation protocol is the paper-grade split protocol:
+The recommended evaluation protocol is:
 - search and select on `val`
-- evaluate the best kept checkpoint on held-out `test` only during finalization
+- evaluate the best kept checkpoint on held-out `test` near the end of the run
 
 ## Kickoff Prompt
 
@@ -64,7 +66,7 @@ Session setup:
 - session tag: chexnet_overnight_20260310
 - selection metric: validation mean_auc
 - the first completed experiment in this session becomes the session baseline
-- held-out test is reserved for finalization only
+- held-out test is reserved for end-of-run evaluation only
 
 Mission:
 Improve the kept chestxray14 validation mean_auc over an overnight run on the local RTX 3060, while staying faithful to the autoresearch workflow.
@@ -107,16 +109,18 @@ Progress behavior:
   - what changed in train.py
 
 End-of-run steps:
-- Run tools/finalize_run.py --dataset chestxray14 --session chexnet_overnight_20260310
+- Run tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chexnet_overnight_20260310 --output progress.png
+- Evaluate the best kept checkpoint on held-out test
+- Optionally run tools/finalize_run.py if you also want the experimental paper/helper outputs
 - Summarize:
   - number of experiments run
   - number of kept improvements
   - best kept validation mean_auc
-  - held-out test mean_auc from finalization
+  - held-out test mean_auc
   - best checkpoint path
   - generated progress plot path
-  - generated paper path
-  - generated figures path
+  - optional paper path if generated
+  - optional figures path if generated
 
 Begin now.
 ```
@@ -140,22 +144,32 @@ best validation result from the same session.
 
 ## End Of Run
 
-Regenerate the run artifacts:
+Refresh the core end-of-run artifacts:
+
+```bash
+uv run python tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chexnet_overnight_20260310 --output progress.png
+uv run python tools/evaluate_checkpoint.py --checkpoint <best_checkpoint_path> --split test --output paper/generated/chestxray14_final_eval.pt
+```
+
+If you also want the experimental helper outputs, run:
 
 ```bash
 uv run python tools/finalize_run.py --dataset chestxray14 --session chexnet_overnight_20260310 --compile-paper
 ```
 
-If `pdflatex` is not available, the paper generator will leave the `.tex` file
-in place and continue.
+If `pdflatex` is not available, the paper helper will leave the `.tex` file in
+place and continue.
 
 ## Outputs
 
-By default the finalize step refreshes:
+By default the core end-of-run flow refreshes:
 
 - `progress.png`
 - `paper/generated/chestxray14_final_eval.pt`
+
+If you also run the optional finalize helper, you may additionally get:
+
 - `paper/generated/chestxray14_figures/`
 - `paper/generated/chestxray14_overnight.tex`
 
-Those are the main artifacts to review in the morning.
+Those are optional extras beyond the core autoresearch artifacts.

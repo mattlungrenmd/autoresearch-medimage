@@ -1,13 +1,13 @@
-# GPU Setup Guide — Free & Paid Options
+# GPU Setup Guide - Free & Paid Options
 
 ## Free GPU Options
 
 ### Google Colab (Free Tier)
-- **GPU**: T4 (16GB VRAM) — free, limited hours
+- **GPU**: T4 (16GB VRAM) - free, limited hours
 - **Notebook options**:
   - `notebooks/colab_quickstart.ipynb` for smoke tests and BYOD
   - `notebooks/colab_chexnet.ipynb` for one ChestX-ray14 baseline run
-  - `notebooks/colab_autoresearch.ipynb` for a real named search session that keeps proposing new fixed-budget mutations around the current best run
+  - `notebooks/colab_autoresearch.ipynb` for a real named autoresearch session that keeps a frontier of strong runs across multiple backbones and keeps proposing new fixed-budget mutations around that frontier
 - **Setup**:
 ```python
 # In a Colab notebook (public repo, no GitHub token needed):
@@ -27,15 +27,16 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 !uv run train.py --recipe toy_binary_smoke --time-budget 5
 ```
 - **No private setup**: no GitHub token, SSH key, or local install required once the repo is public
+- **Local upload fallback**: if your Colab Google account and GitHub account differ, upload the notebook and repo zip locally and run the same flow without GitHub auth inside the runtime
 - **Bring your own data**: upload a zip to Colab or mount Drive, then run `uv run prepare.py --data /content/my_images`
-- **Best ChestX-ray14 search pattern**: mount Drive, stage the dataset to local `/content` once, then run a named `--session` with periodic Drive backups
+- **Best ChestX-ray14 search pattern**: mount Drive, stage the dataset to local `/content` once, then run a named `--session` with frontier-based 300-second search waves and periodic Drive backups
 - **Limits**: ~4 hrs/day GPU, sessions disconnect after idle
 
 ### Kaggle Notebooks (Free Tier)
-- **GPU**: T4 x2 (16GB each) or P100 — 30 hrs/week
+- **GPU**: T4 x2 (16GB each) or P100 - 30 hrs/week
 - **Setup**:
 ```python
-# Kaggle notebook — datasets auto-available
+# Kaggle notebook - datasets auto-available
 !git clone https://github.com/<your-username>/autoresearch-medimage
 %cd autoresearch-medimage
 !pip install -e .
@@ -45,7 +46,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 - **Advantage**: Kaggle datasets load instantly (no download needed)
 
 ### Lightning AI Studios (Free Tier)
-- **GPU**: T4 or A10G — free credits for new users
+- **GPU**: T4 or A10G - free credits for new users
 - **Setup**: Create a studio, clone repo, run normally
 - **Advantage**: Persistent environment, VS Code in browser
 
