@@ -54,8 +54,9 @@ Try the public Colab paths on a free T4 GPU:
   ChestX-ray14 single-baseline `chexnet` demo using a local folder or archive
   you already have
 - [notebooks/colab_autoresearch.ipynb](notebooks/colab_autoresearch.ipynb) for
-  a named multi-experiment ChestX-ray14 search session with Drive sync,
-  keep/discard decisions, and finalization
+  a named ChestX-ray14 search session that seeds a baseline set, then keeps
+  generating new 300-second recipe mutations around the current best run with
+  Drive sync, keep/discard decisions, and finalization
 
 All three notebooks pull a public repo snapshot into `/content`. No local
 setup, GitHub token, or private-repo access is required once the repo is

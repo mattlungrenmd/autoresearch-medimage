@@ -6,8 +6,8 @@ for CheXNet. The winning configuration then informs a full-scale training run.
 
 If you want the Colab-friendly version of this idea, use
 `notebooks/colab_autoresearch.ipynb`. That notebook runs a named multi-run
-session with Drive-backed state, but stays in recipe space instead of asking a
-browser notebook to mutate `train.py` autonomously.
+session with Drive-backed state, seeds a baseline queue, then keeps mutating
+the current best recipe instead of stopping after a fixed shortlist.
 
 ## Goal
 

@@ -7,7 +7,7 @@
 - **Notebook options**:
   - `notebooks/colab_quickstart.ipynb` for smoke tests and BYOD
   - `notebooks/colab_chexnet.ipynb` for one ChestX-ray14 baseline run
-  - `notebooks/colab_autoresearch.ipynb` for a real named multi-experiment search session
+  - `notebooks/colab_autoresearch.ipynb` for a real named search session that keeps proposing new fixed-budget mutations around the current best run
 - **Setup**:
 ```python
 # In a Colab notebook (public repo, no GitHub token needed):
