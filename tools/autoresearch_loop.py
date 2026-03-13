@@ -35,7 +35,10 @@ def load_checkpoint_config(checkpoint_path):
     path = Path(str(checkpoint_path)).expanduser()
     if not path.exists():
         return {}
-    payload = torch.load(path, map_location="cpu")
+    try:
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        payload = torch.load(path, map_location="cpu")
     config = payload.get("config", {})
     return config if isinstance(config, dict) else {}
 
