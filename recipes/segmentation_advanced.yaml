@@ -1,0 +1,42 @@
+# Advanced segmentation with pretrained encoder U-Net + attention + Tversky loss
+# Showcases Phase B+C improvements for segmentation tasks.
+# Expected: 3-8% Dice improvement over vanilla U-Net.
+
+dataset: brain_mri
+
+model:
+  seg_backbone: resnet34        # pretrained encoder (any timm model)
+  seg_attention: true           # attention gates in decoder skip connections
+  pretrained: true
+
+training:
+  batch_size: 8
+  learning_rate: 0.001
+  optimizer: adamw
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: tversky_bce             # Tversky + BCE combined
+  tversky_alpha: 0.7            # lower = penalize FP more
+  tversky_beta: 0.3             # lower = penalize FN more
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: true
+  rotation: 15
+  elastic_transform: true       # tissue-realistic deformations
+  grid_distortion: true         # grid-based distortion
+
+advanced:
+  grad_clip_norm: 1.0
+  ema: true
+  ema_decay: 0.999
+  compute_ci: true
+  swa: true
+  swa_start_ratio: 0.75
+
+paper:
+  title: "Advanced U-Net Segmentation"
+  description: "Pretrained encoder U-Net with attention gates and Tversky loss"

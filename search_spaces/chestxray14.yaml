@@ -1,0 +1,86 @@
+dataset: chestxray14
+task: multilabel
+primary_metric: mean_auc
+default_max_runs: 16
+
+seed_recipes:
+  - chexnet_improved
+  - chestxray14_frontier_densenet169_stronger_color
+  - chestxray14_frontier_resnet50
+  - chestxray14_frontier_convnext_tiny_stronger_color
+  - chestxray14_frontier_efficientnet_b0_stronger_color
+  - chestxray14_frontier_efficientnet_b1_stronger_color
+
+backbone_pool:
+  - densenet121
+  - densenet169
+  - resnet50
+  - convnext_tiny
+  - efficientnet_b0
+  - efficientnet_b1
+
+mutation_families:
+  - backbone_swap
+  - optimizer_scheduler
+  - lr_wd
+  - batch_image
+  - regularization
+  - augmentation
+  - loss
+
+ranges:
+  learning_rate: [0.0001, 0.0003, 0.0005, 0.001, 0.003]
+  weight_decay: [0.0, 0.00001, 0.0001, 0.001, 0.01]
+  dropout: [0.1, 0.2, 0.3, 0.4]
+  batch_size: [8, 16, 24, 32]
+  image_size: [224, 256, 288]
+  label_smoothing: [0.0, 0.05, 0.1]
+
+categorical_choices:
+  optimizer: [adamw, adam, sgd]
+  lr_schedule: [cosine, one_cycle, constant]
+  loss_type: [bce, focal]
+  augmentation_presets:
+    mild:
+      horizontal_flip: true
+      vertical_flip: false
+      rotation: 5
+      color_jitter: false
+      clahe: false
+      elastic_transform: false
+      grid_distortion: false
+      coarse_dropout: false
+      coarse_dropout_ratio: 0.1
+    stronger_color:
+      horizontal_flip: true
+      vertical_flip: false
+      rotation: 10
+      color_jitter: true
+      clahe: false
+      elastic_transform: false
+      grid_distortion: false
+      coarse_dropout: false
+      coarse_dropout_ratio: 0.1
+    spatial_heavy:
+      horizontal_flip: true
+      vertical_flip: false
+      rotation: 15
+      color_jitter: true
+      clahe: false
+      elastic_transform: false
+      grid_distortion: true
+      coarse_dropout: true
+      coarse_dropout_ratio: 0.1
+
+gating_thresholds:
+  immediate_keep_delta: 0.25
+  confirm_delta: 0.10
+  confirmed_mean_delta: 0.15
+
+stagnation_rules:
+  explore_after: 8
+  refresh_after: 16
+  hot_set_size: 4
+  global_elite_size: 6
+  per_branch_elite: 2
+  exploit_children: 3

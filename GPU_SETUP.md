@@ -1,91 +1,101 @@
-# GPU Setup Guide — Free & Paid Options
+# Compute Setup Guide
 
-## Free GPU Options
+This repo is meant to stay usable across a range of hardware instead of one
+specific GPU.
 
-### Google Colab (Free Tier)
-- **GPU**: T4 (16GB VRAM) — free, limited hours
-- **Setup**:
-```python
-# In a Colab notebook:
-!git clone https://github.com/<your-username>/autoresearch-medvision
-%cd autoresearch-medvision
-!pip install -e .
-!python prepare.py --dataset chest_xray
-!python train.py --recipe chest_xray_pneumonia --save-checkpoint
-```
-- **Limits**: ~4 hrs/day GPU, sessions disconnect after idle
+## Supported Compute Targets
 
-### Kaggle Notebooks (Free Tier)
-- **GPU**: T4 x2 (16GB each) or P100 — 30 hrs/week
-- **Setup**:
-```python
-# Kaggle notebook — datasets auto-available
-!git clone https://github.com/<your-username>/autoresearch-medvision
-%cd autoresearch-medvision
-!pip install -e .
-# Kaggle datasets are pre-mounted at /kaggle/input/
-!python train.py --recipe chexnet --save-checkpoint
-```
-- **Advantage**: Kaggle datasets load instantly (no download needed)
+- NVIDIA GPUs through PyTorch `cuda`
+- Apple Silicon through PyTorch `mps`
+- CPU-only environments for smoke tests and debugging
+- hosted notebook GPUs such as Colab and Kaggle
 
-### Lightning AI Studios (Free Tier)
-- **GPU**: T4 or A10G — free credits for new users
-- **Setup**: Create a studio, clone repo, run normally
-- **Advantage**: Persistent environment, VS Code in browser
+`train.py` auto-selects `cuda`, then `mps`, then CPU. The queue helper and
+recipes are written to be portable across those environments, with batch-size
+choices tuned to stay reasonable on modest GPUs.
 
-### Google Cloud Free Credits ($300 for 90 days)
-- **GPU**: T4, A100 available
-- **Setup**: Create a VM with GPU, SSH in, run normally
+## Installation Approach
 
-## Paid GPU Options (Recommended for Serious Work)
-
-### Lambda Labs
-- **A100 80GB**: ~$1.10/hr
-- **H100**: ~$2.49/hr
-- Best for overnight autoresearch runs
-
-### RunPod
-- **A100 80GB**: ~$1.19/hr
-- **H100**: ~$3.29/hr
-- Serverless and pod options
-
-### Vast.ai
-- **Community GPUs**: from $0.15/hr
-- **A100**: ~$0.80/hr
-- Cheapest option, variable availability
-
-### AWS/GCP/Azure
-- Spot instances for cheaper rates
-- Best for production/regulatory work
-
-## Recommended GPU by Task
-
-| Task | Min VRAM | Recommended | Batch Size |
-|------|----------|-------------|------------|
-| CIFAR / Small datasets | 4GB | T4 (16GB) | 128 |
-| Chest X-ray classification | 8GB | T4 (16GB) | 16-32 |
-| ChestX-ray14 (full) | 16GB | A100 (40GB) | 32-64 |
-| Brain MRI segmentation | 8GB | T4 (16GB) | 8-16 |
-| DR grading (384px) | 12GB | A10G (24GB) | 16 |
-| DR grading (512px) | 16GB | A100 (40GB) | 8-16 |
-| ViT/Large models | 24GB+ | A100 (80GB) | 8-16 |
-
-## Running Overnight (Autonomous Mode)
-
-For the full autoresearch experience (agent runs experiments while you sleep):
+Start with the normal repo install:
 
 ```bash
-# Start a tmux/screen session
-tmux new -s autoresearch
-
-# Run the autonomous loop
-# (The agent modifies train.py, runs experiments, keeps improvements)
-# See program.md for full instructions
-
-# Detach: Ctrl+B, then D
-# Reattach: tmux attach -t autoresearch
+uv sync
 ```
 
-Estimated experiments per night (8 hours):
-- **T4**: ~90 experiments (5.3 min each)
-- **A100**: ~95 experiments (5.0 min each with faster compilation)
+If your machine needs a platform-specific PyTorch build, install `torch` and
+`torchvision` for your system using the official PyTorch instructions, then run
+the repo normally with `uv run ...`.
+
+## Local Compute
+
+Typical local workflow:
+
+```bash
+uv run prepare.py --dataset chestxray14
+uv run train.py --recipe chexnet --save-checkpoint
+```
+
+For the backbone-first overnight lane on local compute, use:
+
+```bash
+uv run python tools/run_recipe_queue.py --preset chestxray14_local_overnight --dataset chestxray14 --session your_session --finalize
+```
+
+See [docs/LOCAL_OVERNIGHT_RUN.md](docs/LOCAL_OVERNIGHT_RUN.md) for the full
+local workflow.
+
+## Colab
+
+Colab is a good fit for short frontier sweeps or overnight notebook runs.
+
+Typical flow:
+
+```python
+!git clone https://github.com/<your-username>/autoresearch-medimage
+%cd autoresearch-medimage
+!curl -LsSf https://astral.sh/uv/install.sh | sh
+!uv sync
+!uv run prepare.py --dataset chestxray14
+!uv run train.py --recipe chexnet --save-checkpoint
+```
+
+For the backbone frontier queue, use the Colab runbook in
+[docs/COLAB_OVERNIGHT_RUN.md](docs/COLAB_OVERNIGHT_RUN.md).
+
+## Kaggle And Other Hosted GPUs
+
+Kaggle, Lightning, and cloud VMs can usually run the repo the same way as a
+local Linux machine:
+
+```bash
+uv sync
+uv run prepare.py --dataset chestxray14
+uv run train.py --recipe chexnet --save-checkpoint
+```
+
+If you are using a notebook service with pre-mounted datasets, adapt only the
+dataset path and runtime setup. The training entrypoints stay the same.
+
+## Practical Expectations
+
+- CPU is fine for toy smoke tests and debugging, but not ideal for full
+  ChestX-ray14 search loops.
+- Consumer GPUs and notebook GPUs are enough for the default 300-second
+  research contract.
+- Larger GPUs mainly buy you more headroom for heavier backbones, larger image
+  sizes, and less aggressive batch-size tuning.
+
+## Overnight Agent Runs
+
+The repo includes a queue helper for repeatable session runs:
+
+```bash
+uv run python tools/run_recipe_queue.py --list-presets
+```
+
+That helper is an outer-loop convenience. The research contract is still:
+
+- `prepare.py` stays fixed
+- `train.py` is the mutation surface
+- each experiment uses the fixed 300-second budget by default
+- `results.tsv` remains the ledger of keep/discard decisions

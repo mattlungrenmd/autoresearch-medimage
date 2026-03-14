@@ -1,357 +1,442 @@
 """
-Paper Generator — Auto-generate arXiv-ready LaTeX from experiment results.
+Experimental paper generator.
 
-Reads results.tsv and model checkpoints to generate a methods section,
-results tables, and figures suitable for arXiv submission.
-
-Usage:
-    python paper/generate_paper.py                        # Generate from results.tsv
-    python paper/generate_paper.py --template short       # Short paper (4 pages)
-    python paper/generate_paper.py --template full        # Full paper (8 pages)
-    python paper/generate_paper.py --output paper.tex     # Custom output path
-    python paper/generate_paper.py --compile              # Also compile to PDF
+Generates a draft LaTeX scaffold from results.tsv and, when available,
+checkpoint metadata. The output is intended as a starting point for a paper,
+not a camera-ready or automatically submission-ready manuscript.
 """
 
-import os
-import sys
-import json
 import argparse
+import os
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
+import re
 
 import pandas as pd
+import torch
 
 PAPER_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_DIR = os.path.join(PAPER_DIR, "templates")
 RESULTS_FILE = os.path.join(os.path.dirname(PAPER_DIR), "results.tsv")
+BENCHMARK_DIR = os.path.join(os.path.dirname(PAPER_DIR), "benchmarks")
 
-
-# ---------------------------------------------------------------------------
-# LaTeX generation
-# ---------------------------------------------------------------------------
 
 def escape_latex(text):
-    """Escape special LaTeX characters."""
-    chars = {"&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
-             "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}",
-             "^": r"\textasciicircum{}"}
-    for old, new in chars.items():
+    text = str(text)
+    replacements = {
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    for old, new in replacements.items():
         text = text.replace(old, new)
     return text
 
 
+def load_results(results_path, dataset_filter=None, session_filter=None):
+    if not os.path.exists(results_path):
+        return pd.DataFrame()
+
+    df = pd.read_csv(results_path, sep="\t")
+    if dataset_filter and "dataset" in df.columns:
+        df = df[df["dataset"] == dataset_filter].copy()
+    if "session" in df.columns:
+        session_series = df["session"].fillna("").astype(str).str.strip()
+        if session_filter:
+            df = df[session_series == str(session_filter)].copy()
+        else:
+            non_empty = session_series[session_series != ""]
+            if not non_empty.empty:
+                df = df[session_series == str(non_empty.iloc[-1])].copy()
+    elif session_filter:
+        raise ValueError("results.tsv does not contain a 'session' column")
+    if "status" in df.columns:
+        keep_like = df[df["status"].isin(["keep", "candidate"])]
+        if not keep_like.empty:
+            df = keep_like
+    if "metric" in df.columns:
+        df["metric"] = pd.to_numeric(df["metric"], errors="coerce")
+        df = df.sort_values("metric", ascending=False)
+    return df
+
+
+def load_checkpoint_metadata(best_row):
+    checkpoint_path = str(best_row.get("checkpoint_path", "")).strip()
+    if not checkpoint_path or checkpoint_path.lower() == "nan":
+        return {}, {}
+    if not os.path.isabs(checkpoint_path):
+        checkpoint_path = os.path.join(os.path.dirname(PAPER_DIR), checkpoint_path)
+    if not os.path.exists(checkpoint_path):
+        return {}, {}
+
+    try:
+        payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        payload = torch.load(checkpoint_path, map_location="cpu")
+    return payload.get("results", {}), payload.get("config", {})
+
+
+def load_final_eval(final_eval_path):
+    if not final_eval_path:
+        return None
+    final_eval_path = str(final_eval_path)
+    if not os.path.exists(final_eval_path):
+        return None
+    try:
+        return torch.load(final_eval_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        return torch.load(final_eval_path, map_location="cpu")
+
+
+def format_metric(metric_name, metric_value):
+    metric_name = str(metric_name)
+    if metric_name in {"kappa", "quadratic_kappa"}:
+        return f"{metric_value:.4f}", metric_name
+    return f"{metric_value:.2f}\\%", metric_name
+
+
+def parse_published_chexnet_metric(dataset_name):
+    if dataset_name != "chestxray14":
+        return None
+    benchmark_path = os.path.join(BENCHMARK_DIR, "chestxray14.md")
+    if not os.path.exists(benchmark_path):
+        return None
+    text = Path(benchmark_path).read_text(encoding="utf-8")
+    match = re.search(r"\|\s*\*\*CheXNet\*\*.*?\|\s*\*\*(\d+(?:\.\d+)?)\*\*", text)
+    if not match:
+        return None
+    return float(match.group(1))
+
+
 def generate_results_table(results_df):
-    """Generate LaTeX table from results DataFrame."""
     if results_df.empty:
-        return "% No results yet — run experiments first\n"
+        return "% No experiment rows found.\n"
 
-    # Filter to kept experiments
-    kept = results_df[results_df["status"] == "keep"].copy()
-    if kept.empty:
-        kept = results_df.head(10)
-
+    columns = [col for col in ["dataset", "session", "recipe", "backbone", "metric_name", "metric", "status"] if col in results_df.columns]
     lines = [
         r"\begin{table}[h]",
         r"\centering",
-        r"\caption{Experiment results. Best result in \textbf{bold}.}",
-        r"\label{tab:results}",
-        r"\begin{tabular}{llccl}",
+        r"\caption{Run summary from the experiment ledger.}",
+        r"\begin{tabular}{lllllll}",
         r"\toprule",
-        r"Commit & Metric & Memory (GB) & Status & Description \\",
+        r"Dataset & Session & Recipe & Backbone & Metric & Value & Status \\",
         r"\midrule",
     ]
-
-    best_metric = kept["metric"].max()
-    for _, row in kept.iterrows():
-        metric_str = f"{row['metric']:.2f}"
-        if row["metric"] == best_metric:
-            metric_str = r"\textbf{" + metric_str + "}"
-        desc = escape_latex(str(row.get("description", "")))[:50]
-        lines.append(
-            f"  {row['commit']} & {metric_str} & {row['memory_gb']:.1f} & "
-            f"{row['status']} & {desc} \\\\"
-        )
-
-    lines.extend([
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"\end{table}",
-    ])
+    for _, row in results_df.head(8).iterrows():
+        dataset = escape_latex(row.get("dataset", ""))
+        session = escape_latex(row.get("session", ""))
+        recipe = escape_latex(row.get("recipe", "")) or "manual"
+        backbone = escape_latex(row.get("backbone", ""))
+        metric_name = escape_latex(row.get("metric_name", "metric"))
+        try:
+            metric_value = float(row.get("metric", 0.0))
+        except Exception:
+            metric_value = 0.0
+        metric_display, _ = format_metric(str(row.get("metric_name", "metric")), metric_value)
+        status = escape_latex(row.get("status", "candidate"))
+        lines.append(f"{dataset} & {session} & {recipe} & {backbone} & {metric_name} & {metric_display} & {status} \\\\")
+    lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
     return "\n".join(lines)
 
 
-def generate_per_class_table(checkpoint_results):
-    """Generate per-class AUC table (for multi-label tasks like CheXNet)."""
-    if not checkpoint_results or "per_class_auc" not in checkpoint_results:
+def generate_per_class_table(checkpoint_results, final_eval=None):
+    source_results = final_eval.get("results", {}) if final_eval else checkpoint_results
+    split_name = str(final_eval.get("split", "validation")) if final_eval else "validation"
+    per_class = source_results.get("per_class_auc")
+    if not per_class:
         return ""
 
-    per_class = checkpoint_results["per_class_auc"]
     lines = [
         r"\begin{table}[h]",
         r"\centering",
-        r"\caption{Per-pathology AUC comparison with published results.}",
-        r"\label{tab:per_class}",
-        r"\begin{tabular}{lcc}",
+        rf"\caption{{Per-class {escape_latex(split_name)} AUC from the saved run artifacts.}}",
+        r"\begin{tabular}{lc}",
         r"\toprule",
-        r"Pathology & Ours (AUC \%) & CheXNet (AUC \%) \\",
+        r"Class & AUC (\%) \\",
         r"\midrule",
     ]
-
-    # CheXNet reference values
-    chexnet_ref = {
-        "Atelectasis": 80.94, "Cardiomegaly": 92.48, "Effusion": 86.38,
-        "Infiltration": 73.45, "Mass": 86.81, "Nodule": 78.02,
-        "Pneumonia": 76.80, "Pneumothorax": 93.71, "Consolidation": 80.07,
-        "Edema": 88.78, "Emphysema": 93.71, "Fibrosis": 80.47,
-        "Pleural_Thickening": 80.62, "Hernia": 91.64,
-    }
-
-    for pathology, auc in per_class.items():
-        ref = chexnet_ref.get(pathology, "—")
-        ref_str = f"{ref:.2f}" if isinstance(ref, float) else ref
-        pathology_clean = escape_latex(pathology.replace("_", " "))
-        lines.append(f"  {pathology_clean} & {auc:.2f} & {ref_str} \\\\")
-
-    lines.extend([
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"\end{table}",
-    ])
+    for class_name, auc in per_class.items():
+        lines.append(f"{escape_latex(class_name.replace('_', ' '))} & {float(auc):.2f} \\\\")
+    lines.extend([r"\bottomrule", r"\end{tabular}", r"\end{table}"])
     return "\n".join(lines)
 
 
-def generate_paper(results_df, config, template="full"):
-    """Generate complete LaTeX paper."""
+def generate_manual_section(template):
+    lines = [
+        r"\section{Manual Completion Notes}",
+        r"This draft was generated from local experiment artifacts.",
+        r"The following sections typically require human completion before submission:",
+        r"\begin{itemize}",
+        r"\item related work and citations",
+        r"\item clinical context and dataset provenance narrative",
+        r"\item limitations, failure analysis, and subgroup discussion",
+        r"\item figures and qualitative examples",
+        r"\end{itemize}",
+    ]
+    if template == "full":
+        lines.extend(
+            [
+                r"\section{Experimental Positioning}",
+                r"This repository is designed as an agent-first research framework.",
+                r"The generated manuscript should be reviewed for factual accuracy and claim scope before sharing.",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def generate_protocol_section(final_eval):
+    if not final_eval:
+        return ""
+    split_name = final_eval.get("split", "test")
+    return "\n".join(
+        [
+            r"\section{Evaluation Protocol}",
+            r"During the autonomous search loop, model changes were selected using the validation split only.",
+            rf"A separate held-out {escape_latex(split_name)} split was reserved for final reporting and was not used to rank intermediate experiments.",
+            r"This mirrors the agent-first autoresearch workflow while improving the final reporting discipline relative to a validation-only benchmark.",
+        ]
+    )
+
+
+def generate_final_result_section(final_eval, dataset_name):
+    if not final_eval:
+        return ""
+    results = final_eval.get("results", {})
+    metric_name = final_eval.get("metric_name", "metric")
+    metric_value = float(final_eval.get("primary_metric", 0.0))
+    metric_display, metric_name = format_metric(metric_name, metric_value)
+    lines = [
+        r"\section{Held-Out Final Evaluation}",
+        rf"The best kept run was re-evaluated on the untouched {escape_latex(final_eval.get('split', 'test'))} split of {escape_latex(dataset_name)}.",
+        rf"The held-out result was {metric_display} {escape_latex(metric_name)}.",
+    ]
+    if "per_class_auc" in results:
+        lines.append(r"The per-class table in the manuscript figures should be interpreted as the held-out result when available.")
+    published_chexnet = parse_published_chexnet_metric(dataset_name)
+    if published_chexnet is not None:
+        delta = metric_value - published_chexnet
+        comparison = "above" if delta >= 0 else "below"
+        lines.append(
+            rf"For context, the original CheXNet paper reported 84.10\% mean\_auc, placing this run {abs(delta):.2f} points {comparison} that reference."
+        )
+    return "\n".join(lines)
+
+
+def figure_block(path_str, caption, label, wide=False):
+    env = "figure*" if wide else "figure"
+    width = r"\textwidth" if wide else r"0.98\columnwidth"
+    path = escape_latex(path_str.replace("\\", "/"))
+    return "\n".join(
+        [
+            rf"\begin{{{env}}}[t]",
+            r"\centering",
+            rf"\includegraphics[width={width}]{{{path}}}",
+            rf"\caption{{{escape_latex(caption)}}}",
+            rf"\label{{fig:{escape_latex(label)}}}",
+            rf"\end{{{env}}}",
+        ]
+    )
+
+
+def generate_figure_section(figures_dir, output_path, final_eval=None):
+    if not figures_dir:
+        return ""
+
+    figures_path = Path(figures_dir)
+    if not figures_path.exists():
+        return ""
+
+    output_parent = output_path.parent
+    split_name = str(final_eval.get("split", "validation")) if final_eval else "validation"
+    figure_specs = [
+        ("progress.png", "Autoresearch search trajectory across recorded experiments.", "progress", True),
+        ("benchmark_comparison.png", "Benchmark comparison against published ChestX-ray14 baselines.", "benchmark", False),
+        ("per_class_comparison.png", "Per-pathology AUC comparison with published baselines.", "perclass", True),
+        ("roc_curves.png", f"Representative {split_name} ROC curves for selected pathologies.", "roc", True),
+    ]
+
+    blocks = [r"\section{Figures}"]
+    found_any = False
+    for filename, caption, label, wide in figure_specs:
+        figure_path = figures_path / filename
+        if not figure_path.exists():
+            continue
+        rel_path = os.path.relpath(figure_path, output_parent)
+        blocks.append(figure_block(rel_path, caption, label, wide=wide))
+        found_any = True
+
+    return "\n\n".join(blocks) if found_any else ""
+
+
+def generate_paper(
+    results_df,
+    checkpoint_results,
+    checkpoint_config,
+    dataset_name,
+    template,
+    figures_dir,
+    output_path,
+    final_eval,
+):
     date_str = datetime.now().strftime("%B %Y")
-    year = datetime.now().year
+    if not results_df.empty:
+        best_row = results_df.iloc[0]
+        metric_value = float(best_row.get("metric", 0.0))
+        metric_name = str(best_row.get("metric_name", "metric"))
+        metric_display, metric_name = format_metric(metric_name, metric_value)
+        backbone = checkpoint_config.get("backbone", best_row.get("backbone", "unknown"))
+        task = checkpoint_config.get("task", "classification")
+        recipe = best_row.get("recipe", "") or "manual"
+        dataset_label = best_row.get("dataset", dataset_name)
+        if final_eval:
+            final_metric_display, final_metric_name = format_metric(
+                final_eval.get("metric_name", "metric"), float(final_eval.get("primary_metric", 0.0))
+            )
+            summary_sentence = (
+                f"The best logged validation run used {escape_latex(backbone)} on {escape_latex(dataset_label)} "
+                f"and reached {metric_display} {escape_latex(metric_name)}. "
+                f"The same checkpoint achieved {final_metric_display} {escape_latex(final_metric_name)} on the held-out "
+                f"{escape_latex(final_eval.get('split', 'test'))} split."
+            )
+        else:
+            summary_sentence = (
+                f"The best logged run used {escape_latex(backbone)} on {escape_latex(dataset_label)} "
+                f"and reached {metric_display} {escape_latex(metric_name)}."
+            )
+    else:
+        backbone = checkpoint_config.get("backbone", "unknown")
+        task = checkpoint_config.get("task", "classification")
+        recipe = "manual"
+        summary_sentence = "No experiment rows were found, so this draft contains only structural placeholders."
 
     results_table = generate_results_table(results_df)
+    per_class_table = generate_per_class_table(checkpoint_results, final_eval=final_eval)
+    manual_section = generate_manual_section(template)
+    figure_section = generate_figure_section(figures_dir, output_path, final_eval=final_eval)
+    protocol_section = generate_protocol_section(final_eval)
+    final_result_section = generate_final_result_section(final_eval, dataset_name)
 
-    # Determine best result
-    if not results_df.empty:
-        best_row = results_df.loc[results_df["metric"].idxmax()]
-        best_metric = f"{best_row['metric']:.2f}"
-        best_desc = str(best_row.get("description", "best configuration"))
-    else:
-        best_metric = "N/A"
-        best_desc = "pending experiments"
-
-    dataset_name = config.get("dataset", "medical imaging dataset")
-    task = config.get("task", "classification")
-    backbone = config.get("backbone", "DenseNet-121")
-    metric_name = config.get("metric_name", "AUC")
-
-    latex = rf"""\documentclass[10pt,twocolumn]{{article}}
-
+    return rf"""\documentclass[10pt,twocolumn]{{article}}
 \usepackage[utf8]{{inputenc}}
 \usepackage{{booktabs}}
+\usepackage{{geometry}}
 \usepackage{{graphicx}}
 \usepackage{{hyperref}}
-\usepackage{{amsmath}}
-\usepackage[margin=1in]{{geometry}}
+\geometry{{margin=0.85in}}
 
-\title{{Automated Architecture Search for Medical Image {task.title()}:\\
-Results on {escape_latex(dataset_name)}}}
-
-\author{{autoresearch-medvision\\
-\texttt{{https://github.com/YOUR\_USERNAME/autoresearch-medvision}}}}
-
+\title{{Experimental Draft: Agent-Driven Medical Imaging Research on {escape_latex(dataset_name)}}}
+\author{{autoresearch-medvision}}
 \date{{{date_str}}}
 
 \begin{{document}}
-
 \maketitle
 
 \begin{{abstract}}
-We present results from an automated architecture and hyperparameter search
-for medical image {task} on the {escape_latex(dataset_name)} dataset.
-Using the autoresearch-medvision framework, an autonomous agent iteratively
-explored model architectures (including DenseNet, EfficientNet, ConvNeXt,
-and Vision Transformers), optimizers, loss functions, and augmentation
-strategies through fixed 5-minute training experiments. Our best
-configuration achieved {best_metric}\% {metric_name},
-{'competitive with' if float(best_metric) > 80 else 'approaching'}
-published state-of-the-art results.
-All code and experiments are publicly available.
+This draft was generated from local experiment artifacts produced by the
+autoresearch-medvision repository. It is intended as a scaffold for a paper,
+not as a submission-ready manuscript. {summary_sentence}
 \end{{abstract}}
 
-\section{{Introduction}}
+\section{{Overview}}
+The repository is an agent-first framework for short-horizon medical imaging
+experiments. The inner loop preserves a fixed training budget and a simple
+experiment ledger while allowing the agent to iterate on model and optimization
+choices in \texttt{{train.py}}.
 
-Medical image analysis with deep learning has achieved remarkable results
-across radiology and ophthalmology tasks. However, model development
-typically requires extensive manual experimentation with architectures,
-hyperparameters, and training strategies. We apply the autoresearch
-paradigm~\cite{{karpathy2025autoresearch}} to medical imaging, enabling
-fully autonomous experimentation.
-
-\section{{Methods}}
-
-\subsection{{Dataset}}
-We use the {escape_latex(dataset_name)} dataset for {task}.
-% TODO: Add dataset details (size, classes, splits, preprocessing)
-
-\subsection{{Experimental Setup}}
-Each experiment runs for a fixed 5-minute wall-clock training budget on
-a single GPU. The agent modifies the training configuration (architecture,
-optimizer, loss function, augmentation) and evaluates on a held-out
-validation set. Improvements are kept; regressions are discarded.
-
-\subsection{{Architecture Search}}
-The agent explores the following backbone families via the
-\texttt{{timm}} library:
-\begin{{itemize}}
-    \item DenseNet (121, 169, 201) --- established medical imaging baseline
-    \item EfficientNet (B0--B4) --- strong accuracy/efficiency tradeoff
-    \item ConvNeXt (Small, Base) --- modern CNN architecture
-    \item Vision Transformers (ViT-Small, Swin-Tiny) --- attention-based
-\end{{itemize}}
-
-All models are initialized from ImageNet-pretrained weights and fine-tuned
-with a task-specific classification or segmentation head.
-
-\subsection{{Training Details}}
-% TODO: Fill in from best experiment
-\begin{{itemize}}
-    \item Backbone: {escape_latex(backbone)}
-    \item Optimizer: AdamW
-    \item Learning rate: with warmup and cosine decay
-    \item Loss: {'BCE with logits' if task == 'multilabel' else 'Cross-entropy'} with class weights
-    \item Augmentation: Random flip, rotation, color jitter
-    \item Mixed precision: FP16
-\end{{itemize}}
-
-\section{{Results}}
+\section{{Run Summary}}
+Dataset: {escape_latex(dataset_name)}\\
+Task: {escape_latex(task)}\\
+Recipe: {escape_latex(recipe)}\\
+Backbone: {escape_latex(backbone)}
 
 {results_table}
 
-Our best configuration ({escape_latex(best_desc)}) achieved
-{best_metric}\% {metric_name} on the validation set.
+{per_class_table}
 
-% TODO: Add per-class results table if applicable
-% TODO: Add training curves figure
+{protocol_section}
 
-\section{{Comparison with Published Results}}
+{final_result_section}
 
-\begin{{table}}[h]
-\centering
-\caption{{Comparison with published methods.}}
-\label{{tab:comparison}}
-\begin{{tabular}}{{lcc}}
-\toprule
-Method & {metric_name} (\%) & Year \\
-\midrule
-% TODO: Add published baselines
-Ours (best) & {best_metric} & {year} \\
-\bottomrule
-\end{{tabular}}
-\end{{table}}
+{figure_section}
 
-\section{{Discussion}}
-
-% TODO: Discuss which architectures worked best and why
-% TODO: Discuss failure modes and limitations
-% TODO: Compare with FDA-cleared device performance if applicable
-
-\section{{Conclusion}}
-
-We demonstrated that autonomous architecture search can produce
-competitive medical imaging models with minimal human intervention.
-The autoresearch-medvision framework enables researchers to explore
-the design space systematically and reproducibly.
-
-\section*{{Reproducibility}}
-
-All code, configurations, and experiment logs are available at:
-\url{{https://github.com/YOUR\_USERNAME/autoresearch-medvision}}.
-Experiments can be reproduced with:
+\section{{Reproducibility}}
+This draft was generated from \texttt{{results.tsv}} and optional checkpoint
+metadata. To reproduce a run, prepare the dataset and launch the relevant
+recipe or dataset configuration locally:
 \begin{{verbatim}}
 uv run prepare.py --dataset {dataset_name}
-uv run train.py --recipe <recipe_name>
+uv run train.py --dataset {dataset_name}
 \end{{verbatim}}
 
-\bibliographystyle{{plain}}
-\begin{{thebibliography}}{{9}}
-
-\bibitem{{karpathy2025autoresearch}}
-A.~Karpathy.
-\newblock autoresearch: Autonomous pretraining research.
-\newblock \url{{https://github.com/karpathy/autoresearch}}, 2025.
-
-% TODO: Add relevant citations
-
-\end{{thebibliography}}
+{manual_section}
 
 \end{{document}}
 """
-    return latex
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate arXiv paper from experiment results")
-    parser.add_argument("--results", type=str, default=RESULTS_FILE,
-                        help="Path to results.tsv")
-    parser.add_argument("--template", type=str, default="full",
-                        choices=["short", "full"],
-                        help="Paper template")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output .tex file path")
-    parser.add_argument("--dataset", type=str, default="chestxray14",
-                        help="Dataset name for paper context")
-    parser.add_argument("--compile", action="store_true",
-                        help="Compile LaTeX to PDF (requires pdflatex)")
+    parser = argparse.ArgumentParser(
+        description="Generate an experimental paper scaffold from results.tsv and optional checkpoint metadata"
+    )
+    parser.add_argument("--results", type=str, default=RESULTS_FILE, help="Path to results.tsv")
+    parser.add_argument("--template", type=str, default="full", choices=["short", "full"], help="Paper template")
+    parser.add_argument("--output", type=str, default=None, help="Output .tex file path")
+    parser.add_argument("--dataset", type=str, default=None, help="Optional dataset filter")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
+    parser.add_argument("--figures-dir", type=str, default=None, help="Optional directory containing generated paper figures")
+    parser.add_argument("--final-eval", type=str, default=None, help="Optional held-out final evaluation payload (.pt)")
+    parser.add_argument("--compile", action="store_true", help="Compile LaTeX to PDF if pdflatex is available")
     args = parser.parse_args()
 
-    # Load results
-    if os.path.exists(args.results):
-        results_df = pd.read_csv(args.results, sep="\t")
-        print(f"Loaded {len(results_df)} experiment results")
-    else:
-        print(f"No results file found at {args.results}")
-        print("Generating template with placeholder results...")
-        results_df = pd.DataFrame(columns=["commit", "metric", "memory_gb", "status", "description"])
+    results_df = load_results(args.results, dataset_filter=args.dataset, session_filter=args.session)
+    checkpoint_results = {}
+    checkpoint_config = {}
+    dataset_name = args.dataset or "medical imaging dataset"
+    final_eval = load_final_eval(args.final_eval)
+    if not results_df.empty:
+        checkpoint_results, checkpoint_config = load_checkpoint_metadata(results_df.iloc[0])
+        dataset_name = str(results_df.iloc[0].get("dataset", dataset_name))
 
-    # Config
-    config = {
-        "dataset": args.dataset,
-        "task": "multilabel" if args.dataset == "chestxray14" else "classification",
-        "backbone": "DenseNet-121",
-        "metric_name": "Mean AUC" if args.dataset == "chestxray14" else "Accuracy",
-    }
+    output_path = Path(args.output or os.path.join(PAPER_DIR, "paper.tex"))
+    default_figures_dir = output_path.parent / f"{dataset_name}_figures"
+    figures_dir = args.figures_dir or str(default_figures_dir)
+    latex = generate_paper(
+        results_df,
+        checkpoint_results,
+        checkpoint_config,
+        dataset_name,
+        args.template,
+        figures_dir,
+        output_path,
+        final_eval,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        handle.write(latex)
+    print(f"Experimental paper scaffold written to: {output_path}")
 
-    # Generate
-    latex = generate_paper(results_df, config, template=args.template)
-
-    # Output
-    output_path = args.output or os.path.join(PAPER_DIR, "paper.tex")
-    with open(output_path, "w") as f:
-        f.write(latex)
-    print(f"\nPaper generated: {output_path}")
-
-    # Compile if requested
     if args.compile:
-        import subprocess
-        print("Compiling LaTeX...")
+        pdflatex = shutil.which("pdflatex")
+        if not pdflatex:
+            print("pdflatex not found. Leaving the generated .tex file in place.")
+            return
         result = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", output_path],
-            cwd=os.path.dirname(output_path),
-            capture_output=True, text=True,
+            [pdflatex, "-interaction=nonstopmode", output_path.name],
+            cwd=str(output_path.parent),
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
-            pdf_path = output_path.replace(".tex", ".pdf")
-            print(f"PDF generated: {pdf_path}")
+            print(f"PDF generated: {output_path.with_suffix('.pdf')}")
         else:
-            print("LaTeX compilation failed. Install pdflatex or use Overleaf.")
-            print(result.stderr[:500])
-
-    print(f"\nNext steps:")
-    print(f"  1. Fill in TODO sections in the generated .tex file")
-    print(f"  2. Add figures (training curves, Grad-CAM visualizations)")
-    print(f"  3. Upload to Overleaf or compile locally with pdflatex")
-    print(f"  4. Submit to arXiv: https://arxiv.org/submit")
+            print("LaTeX compilation failed. Review the generated .tex file and local pdflatex setup.")
 
 
 if __name__ == "__main__":

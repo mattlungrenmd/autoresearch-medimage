@@ -1,77 +1,125 @@
-# CLAUDE.md — Agent Instructions for autoresearch-medvision
+# CLAUDE.md
 
-## Project Overview
-Autonomous medical imaging AI research framework. Iteratively experiments with architectures, optimizers, losses, and augmentations — running fixed 5-minute experiments and keeping only improvements.
+## Purpose
 
-## Architecture (3-file design from karpathy/autoresearch)
-- `prepare.py` — **READ-ONLY**. Dataset download, dataloaders, evaluation metrics. Never modify.
-- `train.py` — **Agent-editable**. The ONLY file agents should modify for experiments.
-- `program.md` — Agent instructions. Reference for experiment strategy.
-- `recipes/` — YAML configs for reproducing published papers. Add new ones freely.
+This repo adapts the spirit of `karpathy/autoresearch` to medical imaging.
 
-## Key Commands
+The core contract is still intentionally small:
+
+- `prepare.py` is fixed during experiment loops
+- `train.py` is the experiment surface
+- `program.md` describes the autonomous research loop
+- `results.tsv` is the untracked experiment ledger
+
+Public v1 is scoped to 2D classification, 2D multilabel classification, and
+binary segmentation. Paper/regulatory outputs are experimental artifacts, not
+the main product claim.
+
+## Current State
+
+The repo now supports:
+
+- built-in benchmark datasets plus bring-your-own local datasets
+- automatic result logging to `results.tsv`
+- session-scoped overnight runs via `--session`
+- checkpoint saving with run metadata and evaluation artifacts
+- end-of-run artifact regeneration with `tools/finalize_run.py`
+- manuscript figures and a paper scaffold generated from actual run outputs
+- seeded dataloaders and richer run metadata for more stable overnight comparisons
+
+CheXNet is the canonical hello-world demo, not the whole product story.
+
+## Current CheXNet Baseline
+
+ChestX-ray14 has been tightened into a more paper-grade protocol:
+
+- `data/chestxray14/splits.csv` now contains `train`, `val`, and `test`
+- the Kaggle mirror fallback reads `splits_meta/train_split.csv`,
+  `val_split.csv`, and `test_split.csv` when the original NIH CSV is absent
+- model selection happens on `val`
+- held-out reporting happens on `test` only during finalization
+
+Current baseline ledger state:
+
+- legacy validation-only baseline: `73.41` mean AUC, marked `discard`
+- active paper-grade split baseline: `64.41` validation mean AUC, marked `keep`
+- held-out final test result for the active baseline: `65.31` mean AUC
+
+## Generic vs Dataset-Specific Logic
+
+Generic framework pieces:
+
+- `train.py` experiment loop and checkpoint writing
+- `tools/mark_result.py`
+- `tools/evaluate_checkpoint.py`
+- `tools/finalize_run.py`
+- `paper/generate_figures.py`
+- `paper/generate_paper.py`
+
+ChestX-ray14-specific demo pieces:
+
+- benchmark parsing from `benchmarks/chestxray14.md`
+- per-pathology comparison figures/tables
+- `prepare.py` fallback for the `ksw2000/chestxray14` Kaggle mirror layout
+
+Keep the demo-rich ChestX-ray14 path, but do not let it hardcode the generic
+training/evaluation framework into a chest-only repo.
+
+## Commands
+
 ```bash
-# Install dependencies
 uv sync
-
-# Download a dataset
+uv run prepare.py --list
 uv run prepare.py --dataset chestxray14
-uv run prepare.py --list                    # See all datasets
-
-# Run training with a recipe
+uv run prepare.py --dataset chestxray14 --refresh-splits
 uv run train.py --recipe chexnet --save-checkpoint
-uv run train.py --list-recipes              # See all recipes
-
-# Run default (CheXNet)
-uv run train.py
-
-# Tools
-python tools/paper_tracker.py --days 7 --with-data    # Find new papers
-python tools/kaggle_autodetect.py <kaggle-slug>        # Auto-detect new dataset
-python paper/generate_paper.py --compile               # Generate arXiv paper
-python regulatory/generate_regulatory.py               # Generate regulatory docs
+uv run train.py --recipe chexnet --session chexnet_overnight_20260310 --save-checkpoint
+uv run train.py --list-recipes
+uv run python tools/mark_result.py --dataset chestxray14 --session chexnet_overnight_20260310 --status keep
+uv run python tools/finalize_run.py --dataset chestxray14 --session chexnet_overnight_20260310
+uv run paper/generate_paper.py
+uv run regulatory/generate_regulatory.py
 ```
 
-## Experiment Workflow
-1. Modify globals in `train.py` (BACKBONE, OPTIMIZER, LR, LOSS_TYPE, etc.)
-2. Run: `uv run train.py`
-3. Check output: metric value, memory usage
-4. If improved: `git add train.py && git commit -m "description of change"`
-5. If worse: `git checkout train.py` and try something else
-6. Results auto-append to `results.tsv`
+## Overnight Run Pattern
 
-## What to Modify in train.py
-- `BACKBONE` — any timm model name (densenet121, efficientnet_b3, convnext_small, swin_tiny_patch4_window7_224, vit_small_patch16_224)
-- `OPTIMIZER` — adam, adamw, sgd
-- `LR` — learning rate (try 1e-4 to 3e-3)
-- `WEIGHT_DECAY` — (0 to 0.05)
-- `BATCH_SIZE` — (8, 16, 32, 64)
-- `LOSS_TYPE` — auto, bce, focal_bce, cross_entropy, focal, dice_bce
-- `IMAGE_SIZE` — (224, 256, 384, 512)
-- `DROPOUT` — (0.0 to 0.5)
-- Augmentation settings in the training section
+The repo is designed for agent-driven fixed-budget experiments, but it does not
+ship a detached scheduler that mutates `train.py` without an attached agent
+session.
 
-## Datasets Available
-| Dataset | Task | Metric | Kaggle Slug |
-|---------|------|--------|-------------|
-| chestxray14 | Multi-label (14) | Mean AUC | nih-clinical-center/nih-chest-xrays |
-| aptos | Classification (5) | Quad Kappa | mariaherrerot/aptos2019 |
-| oct | Classification (4) | Accuracy | paultimothymooney/kermany2018 |
-| chest_xray | Binary classification | AUC | paultimothymooney/chest-xray-pneumonia |
-| brain_mri | Segmentation | Dice | mateuszbuda/lgg-mri-segmentation |
-| retina_vessel | Segmentation | Dice | abdallahwagih/retina-blood-vessel |
-| pneumothorax | Segmentation | Dice | vbookshelf/pneumothorax-chest-xray-images-and-masks |
+For long runs, use an isolated workspace or clone:
 
-## 3-Phase Strategy (see program.md for details)
-- **Phase 1 (Experiments 1-20):** Architecture sweep — try DenseNet, EfficientNet, ConvNeXt, ViT, Swin
-- **Phase 2 (Experiments 20-50):** Hyperparameter tuning on winning architecture
-- **Phase 3 (Experiments 50-100):** Augmentation optimization + advanced tricks
+- freeze one workspace for the overnight agent session
+- let the user keep working in a separate workspace
+- share only read-only heavy assets if helpful (`data`, `.venv`)
+- do not edit the run workspace while the agent is iterating
 
-## Rules
-- Each experiment has a 5-minute wall-clock budget (TIME_BUDGET=300 in prepare.py)
-- Only modify `train.py` — never touch `prepare.py`
-- Always commit improvements with descriptive messages
-- Always revert regressions: `git checkout train.py`
-- Log results to results.tsv (auto-handled by train.py)
-- Use mixed precision (FP16) — already enabled
-- Start from pretrained ImageNet weights — already the default
+During the loop:
+
+- do not modify `prepare.py`
+- only modify `train.py`
+- create a fresh session tag and treat experiment 1 in that session as the only inner-loop baseline
+- write run output to `run.log`
+- compare experiments on `val` only
+- do not use literature numbers for keep/discard decisions
+- mark rows as `keep` or `discard` in `results.tsv`
+- call `tools/finalize_run.py` once at the end to get the held-out `test` report
+
+## Key Artifacts
+
+Current important outputs include:
+
+- `results.tsv`
+- `run.log`
+- `progress.png`
+- `paper/generated/chestxray14_final_eval.pt`
+- `paper/generated/chestxray14_figures/`
+- `paper/generated/chestxray14_overnight.tex`
+- `regulatory/generated/chestxray14_overnight/`
+
+## Guardrails
+
+- do not claim MONAI, 2.5D, 3D, DICOM-series, or volumetric support as current
+- do not treat the generated paper as submission-ready without human revision
+- do not treat the regulatory outputs as real FDA/CE/UKCA submission packs
+- keep CheXNet as the public hello-world, paired with the bring-your-own-data story

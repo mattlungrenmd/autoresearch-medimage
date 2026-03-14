@@ -1,505 +1,247 @@
 """
-Regulatory Documentation Generator — Scaffold FDA 510(k), CE/UKCA docs from model results.
+Experimental regulatory scaffold generator.
 
-Generates regulatory documentation templates pre-filled with model performance data,
-intended use statements, and predicate device comparisons.
-
-Usage:
-    python regulatory/generate_regulatory.py                     # Generate all templates
-    python regulatory/generate_regulatory.py --type fda          # FDA 510(k) only
-    python regulatory/generate_regulatory.py --type ce           # CE/MDR only
-    python regulatory/generate_regulatory.py --type ukca         # UKCA only
-    python regulatory/generate_regulatory.py --results results.tsv  # Use experiment data
+These documents are research templates intended to organize evidence gaps and
+submission preparation work. They are not submission-ready filings.
 """
 
-import os
 import argparse
+import os
 from datetime import datetime
-from pathlib import Path
+
+import pandas as pd
 
 REGULATORY_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(REGULATORY_DIR, "templates")
 OUTPUT_DIR = os.path.join(REGULATORY_DIR, "output")
+RESULTS_FILE = os.path.join(os.path.dirname(REGULATORY_DIR), "results.tsv")
 
 
-# ---------------------------------------------------------------------------
-# FDA 510(k) Templates
-# ---------------------------------------------------------------------------
+def load_best_result(results_path, dataset_filter=None, session_filter=None):
+    if not results_path or not os.path.exists(results_path):
+        return {}
+    df = pd.read_csv(results_path, sep="\t")
+    if dataset_filter and "dataset" in df.columns:
+        df = df[df["dataset"].astype(str) == str(dataset_filter)]
+    if "session" in df.columns:
+        session_series = df["session"].fillna("").astype(str).str.strip()
+        if session_filter:
+            df = df[session_series == str(session_filter)]
+        else:
+            non_empty = session_series[session_series != ""]
+            if not non_empty.empty:
+                df = df[session_series == str(non_empty.iloc[-1])]
+    elif session_filter:
+        raise ValueError("results.tsv does not contain a 'session' column")
+    if "status" in df.columns:
+        keep_like = df[df["status"].isin(["keep", "candidate"])]
+        if not keep_like.empty:
+            df = keep_like
+    if df.empty or "metric" not in df.columns:
+        return {}
+    df["metric"] = pd.to_numeric(df["metric"], errors="coerce")
+    return df.sort_values("metric", ascending=False).iloc[0].to_dict()
 
-def generate_fda_510k(config):
-    """Generate FDA 510(k) predicate comparison and substantial equivalence argument."""
-    device_name = config.get("device_name", "[YOUR DEVICE NAME]")
-    intended_use = config.get("intended_use", "[INTENDED USE STATEMENT]")
-    indication = config.get("indication", "[INDICATION FOR USE]")
-    dataset = config.get("dataset", "[DATASET NAME]")
-    metric_name = config.get("metric_name", "AUC")
-    best_metric = config.get("best_metric", "[XX.XX]")
-    backbone = config.get("backbone", "[MODEL ARCHITECTURE]")
 
-    return f"""# FDA 510(k) Presubmission — {device_name}
-# Generated: {datetime.now().strftime('%Y-%m-%d')}
-# STATUS: TEMPLATE — Requires regulatory counsel review
+def format_metric_value(value):
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return str(value)
 
-## 1. Device Description
 
-**Device Name:** {device_name}
-**Classification:** Class II Medical Device (Computer-Aided Detection/Diagnosis)
-**Product Code:** QIH (Radiological Computer Aided Detection/Diagnosis)
-**Regulation Number:** 21 CFR 892.2080
+def infer_defaults(best_row, args):
+    dataset = args.dataset or best_row.get("dataset", "Custom medical imaging dataset")
+    metric_name = args.metric or best_row.get("metric_name", "metric")
+    best_metric = format_metric_value(args.best_metric or best_row.get("metric", "[TBD]"))
+    backbone = best_row.get("backbone", "unknown")
+    recipe = best_row.get("recipe", "")
 
-### 1.1 Intended Use
-{intended_use}
+    dataset_lower = str(dataset).lower()
+    if "chest" in dataset_lower or "xray" in dataset_lower:
+        intended_use = (
+            args.intended_use
+            or "Research-use-only model for assisting the review of chest radiographs in retrospective evaluation workflows."
+        )
+        device_name = args.device_name or "Experimental Chest Imaging Research Model"
+    else:
+        intended_use = (
+            args.intended_use
+            or "Research-use-only model for evaluating medical imaging data within retrospective experimentation workflows."
+        )
+        device_name = args.device_name or "Experimental Medical Imaging Research Model"
 
-### 1.2 Indications for Use
-{indication}
+    return {
+        "device_name": device_name,
+        "intended_use": intended_use,
+        "dataset": dataset,
+        "metric_name": metric_name,
+        "best_metric": best_metric,
+        "backbone": backbone,
+        "recipe": recipe,
+    }
 
-### 1.3 Technology Description
-- **Architecture:** {backbone}
-- **Input:** DICOM / PNG / JPEG medical images
-- **Output:** Probability scores per pathology class
-- **Processing:** On-device inference (no cloud requirement)
 
----
+def shared_gap_section():
+    return """## Evidence Gaps / Not Submission Ready
 
-## 2. Predicate Device Comparison
+This scaffold is intentionally conservative. Before any submission, at minimum
+the following evidence and process gaps must be closed:
 
-| Feature | This Device | Predicate 1 | Predicate 2 |
-|---------|-------------|-------------|-------------|
-| Intended Use | {intended_use[:50]}... | [PREDICATE USE] | [PREDICATE USE] |
-| Technology | Deep learning ({backbone}) | [PREDICATE TECH] | [PREDICATE TECH] |
-| Input | Digital radiograph | [PREDICATE INPUT] | [PREDICATE INPUT] |
-| Output | Pathology probabilities | [PREDICATE OUTPUT] | [PREDICATE OUTPUT] |
-| {metric_name} | {best_metric}% | [PREDICATE METRIC] | [PREDICATE METRIC] |
-
-### 2.1 Known Predicate Devices (Computer-Aided Detection — Chest X-ray)
-| Device | Company | 510(k) Number | Clearance Date | Claimed AUC |
-|--------|---------|---------------|----------------|-------------|
-| qXR | Qure.ai | K201501 | 2020-09 | 94-99% (per pathology) |
-| Lunit INSIGHT CXR | Lunit | K200380 | 2020-05 | 97-99% (4 findings) |
-| Annalise CXR | Annalise.ai | K213421 | 2022-04 | 124 findings, AUC 90%+ |
-| BriefCase (Zebra) | Zebra Medical | K191154 | 2019-10 | Pneumothorax 94%+ |
-| InferRead DR Chest | Infervision | K212946 | 2022 | AUC > 95% |
-
-### 2.2 Substantial Equivalence Argument
-[FILL IN: Explain how your device is substantially equivalent to the predicate
-in terms of intended use, technology, and performance. Reference specific
-predicate devices and their 510(k) numbers.]
-
----
-
-## 3. Performance Testing — Summary
-
-### 3.1 Standalone Performance
-| Metric | Value | 95% CI | Predicate Benchmark |
-|--------|-------|--------|---------------------|
-| Mean {metric_name} | {best_metric}% | [CI] | [BENCHMARK] |
-| Sensitivity | [XX.X]% | [CI] | [BENCHMARK] |
-| Specificity | [XX.X]% | [CI] | [BENCHMARK] |
-| PPV | [XX.X]% | [CI] | [BENCHMARK] |
-| NPV | [XX.X]% | [CI] | [BENCHMARK] |
-
-### 3.2 Per-Pathology Performance
-[INSERT per_class_auc table from model evaluation]
-
-### 3.3 Reader Study Design
-[REQUIRED: Design a multi-reader multi-case (MRMC) study]
-- **Readers:** [N] board-certified radiologists
-- **Cases:** [N] retrospective cases from [SITE]
-- **Design:** Crossover — each reader reads with and without AI assist
-- **Primary endpoint:** AUC improvement with AI assist
-- **Sample size justification:** [FILL IN — use FDA guidance on MRMC studies]
-
----
-
-## 4. Software Documentation (IEC 62304)
-
-### 4.1 Software Level of Concern
-**Level:** [A / B / C — likely B or C for CADe/CADx]
-
-### 4.2 Software Description
-| Component | Description |
-|-----------|-------------|
-| Framework | PyTorch {config.get('torch_version', '[VERSION]')} |
-| Model | {backbone} (pretrained ImageNet + fine-tuned) |
-| Libraries | timm, torchvision, albumentations |
-| Input format | DICOM, PNG, JPEG |
-| Output format | JSON (pathology probabilities) |
-| OS | Linux (inference server) |
-
-### 4.3 SOUP (Software of Unknown Provenance)
-| Library | Version | Risk | Mitigation |
-|---------|---------|------|------------|
-| PyTorch | [VER] | Medium | Widely validated, pinned version |
-| timm | [VER] | Medium | Pretrained weights verified |
-| albumentations | [VER] | Low | Preprocessing only |
-| numpy | [VER] | Low | Widely validated |
-| Pillow | [VER] | Low | Image I/O only |
-
----
-
-## 5. Cybersecurity (FDA Guidance 2023)
-
-### 5.1 Threat Model
-[FILL IN: STRIDE analysis for your deployment scenario]
-
-### 5.2 SBOM (Software Bill of Materials)
-[Generate from `pip freeze` or `uv pip list`]
-
----
-
-## 6. Labeling
-
-### 6.1 Warnings and Precautions
-- This device is intended to assist, not replace, clinical judgment
-- Performance validated on [DATASET] — may not generalize to all populations
-- Not validated for pediatric patients (< 18 years)
-- Not validated for images with implanted devices
-- [ADD population-specific limitations]
-
-### 6.2 Contraindications
-- [FILL IN based on your validation data gaps]
-
----
-
-## 7. Checklist — Pre-Submission
-
-- [ ] Predicate device(s) identified with 510(k) numbers
-- [ ] Substantial equivalence argument drafted
-- [ ] Standalone performance on representative dataset
-- [ ] Multi-reader multi-case (MRMC) study designed
-- [ ] IEC 62304 software documentation
-- [ ] Risk analysis (ISO 14971) completed
-- [ ] Cybersecurity documentation (SBOM, threat model)
-- [ ] Labeling reviewed by regulatory counsel
-- [ ] Pre-submission meeting requested with FDA (recommended)
-
----
-
-*This template is for guidance only. Consult with a regulatory affairs professional
-and legal counsel before any FDA submission. FDA requirements change — check the
-latest guidance documents at https://www.fda.gov/medical-devices.*
+- prospective or real-world validation
+- subgroup and fairness analysis
+- reader study or workflow-impact study where clinically relevant
+- software lifecycle, risk management, and QMS evidence
+- cybersecurity, interoperability, and deployment documentation
+- labeling, intended-use, and contraindication review by regulatory counsel
 """
 
 
-def generate_ce_mdr(config):
-    """Generate EU MDR / CE marking documentation scaffold."""
-    device_name = config.get("device_name", "[YOUR DEVICE NAME]")
-    intended_use = config.get("intended_use", "[INTENDED USE STATEMENT]")
-    best_metric = config.get("best_metric", "[XX.XX]")
-    metric_name = config.get("metric_name", "AUC")
-
-    return f"""# CE Marking — EU MDR 2017/745 Documentation
-# Device: {device_name}
+def generate_fda(config):
+    return f"""# FDA Research Scaffold - {config['device_name']}
 # Generated: {datetime.now().strftime('%Y-%m-%d')}
-# STATUS: TEMPLATE — Requires Notified Body and regulatory counsel review
+# STATUS: Experimental template only
 
-## 1. Device Classification (EU MDR)
+## Device Summary
 
-**Classification:** Class IIa (Rule 11 — software intended to provide information
-used to make decisions with diagnosis or therapeutic purposes)
+- Device name: {config['device_name']}
+- Intended use: {config['intended_use']}
+- Validation dataset: {config['dataset']}
+- Primary metric: {config['metric_name']}
+- Best logged value: {config['best_metric']}
+- Backbone: {config['backbone']}
+- Recipe or run label: {config['recipe'] or 'manual'}
 
-**Note:** AI/ML-based diagnostic software is typically Class IIa under MDR Rule 11.
-If the software is intended for screening (life-threatening conditions), it may be
-Class IIb or III. Consult with your Notified Body.
+## FDA-Facing Questions To Resolve
 
-**UDI-DI:** [To be assigned]
-**EUDAMED registration:** [Required before market placement]
+- product code and regulation number for the actual intended use
+- whether the device is CADe, CADx, triage, quantification, or another SaMD category
+- predicate strategy versus De Novo strategy
+- required standalone testing and any reader-study expectations
+- software documentation scope under IEC 62304 and related guidance
 
----
+## Draft Submission Workstreams
 
-## 2. General Safety and Performance Requirements (GSPR) Checklist
+- intended-use and indications-for-use statement
+- validation dataset description and inclusion/exclusion criteria
+- model architecture, training controls, and change-management plan
+- statistical analysis plan and confidence intervals
+- labeling, warnings, and deployment environment assumptions
 
-### Annex I — Essential Requirements
+{shared_gap_section()}
 
-| GSPR # | Requirement | Applicable | Evidence |
-|--------|-------------|------------|----------|
-| 1 | Device achieves intended performance | Yes | Clinical evaluation, validation study |
-| 2 | Design minimizes risk | Yes | Risk management file (ISO 14971) |
-| 3 | Device suitable for intended use | Yes | Usability evaluation (IEC 62366) |
-| 4 | Transport/storage conditions | N/A | Software only |
-| 5 | Acceptable benefit-risk ratio | Yes | Clinical evaluation report |
-| 6 | Performance maintained during lifetime | Yes | Post-market surveillance plan |
-| 8 | Device and manufacturing consistent | Yes | QMS (ISO 13485) |
-| 9.1 | Design ensures safety | Yes | Risk management |
-| 10 | Chemical/physical/biological properties | N/A | Software only |
-| 11 | Infection and microbial contamination | N/A | Software only |
-| 14 | Devices with measuring function | N/A | No measurement |
-| 15 | Protection against radiation | N/A | No radiation emitted |
-| 16 | Electronic programmable systems | Yes | IEC 62304, software validation |
-| 17 | Software (AI/ML specific) | Yes | IEC 62304, AI/ML lifecycle |
-| 23 | Labeling requirements | Yes | IFU documentation |
+## Disclaimer
 
----
+This file is a research planning scaffold. It is not legal, regulatory, or
+submission advice.
+"""
 
-## 3. Clinical Evaluation Report (CER) — Outline
 
-### 3.1 Scope
-Clinical evaluation of {device_name} for {intended_use}, per MDR Article 61
-and MEDDEV 2.7/1 Rev 4.
+def generate_ce(config):
+    return f"""# CE / EU MDR Research Scaffold - {config['device_name']}
+# Generated: {datetime.now().strftime('%Y-%m-%d')}
+# STATUS: Experimental template only
 
-### 3.2 Clinical Data Sources
-1. **Literature review:** Systematic search of PubMed, Embase for comparable AI devices
-2. **Clinical investigation data:** [Validation study results]
-3. **Post-market data:** [To be collected]
-4. **Equivalent device data:** [If applicable]
+## Device Summary
 
-### 3.3 State of the Art
-[FILL IN: Current standard of care, existing AI devices, clinical need]
+- Device name: {config['device_name']}
+- Intended use: {config['intended_use']}
+- Validation dataset: {config['dataset']}
+- Primary metric: {config['metric_name']}
+- Best logged value: {config['best_metric']}
+- Backbone: {config['backbone']}
 
-### 3.4 Performance Summary
-| Metric | Our Device | Literature Benchmark | Clinical Significance |
-|--------|-----------|---------------------|----------------------|
-| {metric_name} | {best_metric}% | [BENCHMARK] | [SIGNIFICANCE] |
-| Sensitivity | [XX.X]% | [BENCHMARK] | [SIGNIFICANCE] |
-| Specificity | [XX.X]% | [BENCHMARK] | [SIGNIFICANCE] |
+## EU MDR Workstreams
 
-### 3.5 Benefit-Risk Analysis
-[FILL IN: Benefits of AI-assisted diagnosis vs. risks of false positives/negatives]
+- classification under Rule 11 based on actual intended use
+- technical documentation and software lifecycle evidence
+- clinical evaluation report scope and literature strategy
+- risk management and post-market surveillance planning
+- usability, interoperability, and cybersecurity evidence
 
-### 3.6 Conclusions
-[FILL IN: Device meets GSPR, acceptable benefit-risk ratio, suitable for intended use]
+## Evidence Package Notes
 
----
+- this scaffold assumes a research model, not a market-ready device
+- any clinical, workflow, or economic claims require dedicated supporting evidence
+- literature benchmarking does not replace device-specific validation
 
-## 4. Post-Market Surveillance (PMS) Plan
+{shared_gap_section()}
 
-### 4.1 Monitoring Activities
-- Model performance drift monitoring (monthly {metric_name} recalculation)
-- Vigilance reporting (serious incidents within 15 days)
-- Periodic Safety Update Report (PSUR) — every [1-2] years for Class IIa
-- Customer complaint handling
+## Disclaimer
 
-### 4.2 Post-Market Clinical Follow-up (PMCF)
-- Prospective data collection from [N] clinical sites
-- Annual {metric_name} benchmarking against updated state of the art
-- Subgroup analysis (age, sex, ethnicity, device manufacturer)
-
----
-
-## 5. Quality Management System
-
-**Standard:** ISO 13485:2016
-**Notified Body:** [SELECT — e.g., BSI, TÜV SÜD, SGS, DEKRA]
-
-### 5.1 AI/ML Specific Processes
-- Dataset management and versioning
-- Model training, validation, and testing procedures
-- Algorithm change management protocol
-- Bias and fairness assessment
-
----
-
-## 6. Checklist — CE Marking
-
-- [ ] Device classification confirmed (Rule 11)
-- [ ] QMS (ISO 13485) certified
-- [ ] Technical documentation (Annex II/III) complete
-- [ ] Clinical Evaluation Report written
-- [ ] Risk management file (ISO 14971) complete
-- [ ] Software lifecycle (IEC 62304) documented
-- [ ] Usability engineering (IEC 62366) completed
-- [ ] Labeling and IFU prepared
-- [ ] Post-market surveillance plan
-- [ ] PMCF plan
-- [ ] EU Authorized Representative designated (if non-EU manufacturer)
-- [ ] Notified Body audit scheduled
-- [ ] EUDAMED registration prepared
-- [ ] Declaration of Conformity drafted
-
----
-
-*This template is for guidance only. EU MDR requirements are complex and
-evolving. Engage a qualified regulatory consultant and Notified Body early
-in the process.*
+This file is a research planning scaffold. It is not a CE-mark-ready dossier.
 """
 
 
 def generate_ukca(config):
-    """Generate UK MDR 2002 / UKCA documentation scaffold."""
-    device_name = config.get("device_name", "[YOUR DEVICE NAME]")
-    intended_use = config.get("intended_use", "[INTENDED USE STATEMENT]")
-    best_metric = config.get("best_metric", "[XX.XX]")
-    metric_name = config.get("metric_name", "AUC")
-
-    return f"""# UKCA Marking — UK MDR 2002 (as amended) Documentation
-# Device: {device_name}
+    return f"""# UKCA / MHRA Research Scaffold - {config['device_name']}
 # Generated: {datetime.now().strftime('%Y-%m-%d')}
-# STATUS: TEMPLATE — Requires UK Approved Body and regulatory counsel review
+# STATUS: Experimental template only
 
-## 1. Regulatory Framework
+## Device Summary
 
-Post-Brexit, the UK has its own medical device regulations:
-- **UK MDR 2002** (SI 2002 No. 618, as amended by SI 2023 No. 627)
-- **UKCA marking** required for devices placed on the GB market
-- **CE marking** accepted until June 2028 (extended deadline)
-- **UK Approved Bodies** replace EU Notified Bodies
+- Device name: {config['device_name']}
+- Intended use: {config['intended_use']}
+- Validation dataset: {config['dataset']}
+- Primary metric: {config['metric_name']}
+- Best logged value: {config['best_metric']}
+- Backbone: {config['backbone']}
 
-### 1.1 Classification
-**Classification:** Class IIa (analogous to EU MDR Rule 11)
-**UK Approved Body:** [SELECT — e.g., BSI UK, SGS UK]
+## UK-Specific Planning Notes
 
----
+- confirm MHRA pathway and UKCA/CE applicability at the planned launch date
+- map NICE evidence expectations to the actual use case
+- define NHS interoperability and deployment assumptions if relevant
+- define UK-specific population validation needs
 
-## 2. Essential Requirements (UK MDR 2002, Schedule 1)
+## Documentation Tracks
 
-| Req # | Requirement | Evidence |
-|-------|-------------|----------|
-| 1 | Device does not compromise safety | Risk management (ISO 14971) |
-| 2 | Design and construction principles | Technical documentation |
-| 3 | Acceptable risk with benefit | Clinical evaluation |
-| 6 | Performance as intended | Validation study |
-| 12 | Software verification and validation | IEC 62304 |
-| 13 | Labeling | IFU documentation |
+- technical documentation and software lifecycle controls
+- clinical evaluation and any UK population evidence
+- safety case, risk management, and post-market surveillance
+- deployment, interoperability, cybersecurity, and service ownership
 
----
+{shared_gap_section()}
 
-## 3. Performance Summary
+## Disclaimer
 
-| Metric | Value | UK Population Validation |
-|--------|-------|--------------------------|
-| {metric_name} | {best_metric}% | [UK COHORT RESULTS] |
-| Sensitivity | [XX.X]% | [UK COHORT] |
-| Specificity | [XX.X]% | [UK COHORT] |
-
-### 3.1 UK-Specific Considerations
-- Validation on UK patient demographics (NHS population)
-- Compatibility with NHS PACS systems
-- NICE evidence standards framework for digital health technologies
-- NHS Digital Technology Assessment Criteria (DTAC)
-
----
-
-## 4. NICE Evidence Standards
-
-For NHS adoption, the device should meet NICE Evidence Standards Framework:
-- **Tier 1** (Inform): Relevant health condition, current pathway
-- **Tier 2** (Communicate): Credible clinical evidence of effectiveness
-- **Tier 3a** (Diagnose — low risk): High-quality observational/quasi-experimental
-- **Tier 3b** (Diagnose — high risk): Randomized controlled evidence
-
-### 4.1 NICE Submission Checklist
-- [ ] Evidence standards tier identified
-- [ ] Health economic analysis prepared
-- [ ] NHS pathway integration documented
-- [ ] Comparator analysis (current standard of care)
-- [ ] Real-world evidence from UK clinical sites
-
----
-
-## 5. NHS Digital — DTAC Compliance
-
-| Domain | Requirement | Status |
-|--------|-------------|--------|
-| Clinical safety | DCB 0129 (manufacturer) / DCB 0160 (deployer) | [ ] |
-| Data protection | UK GDPR / Data Protection Act 2018 | [ ] |
-| Technical security | Cyber Essentials Plus / DSPT | [ ] |
-| Interoperability | FHIR / HL7 / DICOM compliance | [ ] |
-| Usability | Accessibility (WCAG 2.1 AA) | [ ] |
-
----
-
-## 6. Post-Market Surveillance (UK)
-
-- **MHRA reporting**: Serious incidents within 15 days
-- **Field Safety Corrective Actions** (FSCA) as needed
-- **Periodic Summary Reports** to MHRA
-- **UK Responsible Person** designated (if non-UK manufacturer)
-
----
-
-## 7. Checklist — UKCA Marking
-
-- [ ] UK MDR 2002 classification confirmed
-- [ ] UK Approved Body selected and engaged
-- [ ] Technical documentation complete
-- [ ] Clinical evaluation (UK population data)
-- [ ] ISO 13485 QMS certification
-- [ ] Risk management (ISO 14971)
-- [ ] Software lifecycle (IEC 62304)
-- [ ] UK Responsible Person designated (if needed)
-- [ ] UKCA Declaration of Conformity
-- [ ] Device registered with MHRA
-- [ ] NICE evidence standards assessment
-- [ ] DTAC compliance (for NHS deployment)
-
----
-
-*This template is for guidance only. UK regulatory requirements are evolving
-post-Brexit. Consult with MHRA guidance and qualified regulatory professionals.*
+This file is a research planning scaffold. It is not a UKCA-ready submission pack.
 """
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def main():
-    parser = argparse.ArgumentParser(description="Generate regulatory documentation from model results")
-    parser.add_argument("--type", type=str, default="all",
-                        choices=["all", "fda", "ce", "ukca"],
-                        help="Documentation type to generate")
-    parser.add_argument("--device-name", type=str, default="AI-Assisted Chest X-ray Analysis",
-                        help="Device name")
-    parser.add_argument("--intended-use", type=str,
-                        default="Computer-aided detection of thoracic pathologies in chest radiographs",
-                        help="Intended use statement")
-    parser.add_argument("--dataset", type=str, default="ChestX-ray14",
-                        help="Validation dataset name")
-    parser.add_argument("--metric", type=str, default="Mean AUC",
-                        help="Primary performance metric name")
-    parser.add_argument("--best-metric", type=str, default=None,
-                        help="Best metric value (auto-read from results.tsv if not provided)")
-    parser.add_argument("--results", type=str, default=None,
-                        help="Path to results.tsv to auto-fill performance data")
-    parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR,
-                        help="Output directory for generated docs")
+    parser = argparse.ArgumentParser(
+        description="Generate experimental regulatory scaffolds from results.tsv and run metadata"
+    )
+    parser.add_argument("--type", type=str, default="all", choices=["all", "fda", "ce", "ukca"], help="Documentation type to generate")
+    parser.add_argument("--device-name", type=str, default=None, help="Optional device name override")
+    parser.add_argument("--intended-use", type=str, default=None, help="Optional intended-use override")
+    parser.add_argument("--dataset", type=str, default=None, help="Optional dataset override")
+    parser.add_argument("--session", type=str, default=None, help="Optional session filter")
+    parser.add_argument("--metric", type=str, default=None, help="Optional primary metric override")
+    parser.add_argument("--best-metric", type=str, default=None, help="Optional best metric override")
+    parser.add_argument("--results", type=str, default=RESULTS_FILE, help="Path to results.tsv")
+    parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR, help="Output directory for generated docs")
     args = parser.parse_args()
 
-    # Try to read best metric from results
-    best_metric = args.best_metric or "[XX.XX]"
-    if not args.best_metric and args.results:
-        try:
-            import pandas as pd
-            df = pd.read_csv(args.results, sep="\t")
-            if not df.empty and "metric" in df.columns:
-                best_metric = f"{df['metric'].max():.2f}"
-                print(f"Best metric from results: {best_metric}%")
-        except Exception:
-            pass
-
-    config = {
-        "device_name": args.device_name,
-        "intended_use": args.intended_use,
-        "dataset": args.dataset,
-        "metric_name": args.metric,
-        "best_metric": best_metric,
-        "backbone": "DenseNet-121",
-    }
-
+    best_row = load_best_result(args.results, dataset_filter=args.dataset, session_filter=args.session)
+    config = infer_defaults(best_row, args)
     os.makedirs(args.output_dir, exist_ok=True)
 
     generators = {
-        "fda": ("fda_510k_scaffold.md", generate_fda_510k),
-        "ce": ("ce_mdr_scaffold.md", generate_ce_mdr),
+        "fda": ("fda_510k_scaffold.md", generate_fda),
+        "ce": ("ce_mdr_scaffold.md", generate_ce),
         "ukca": ("ukca_scaffold.md", generate_ukca),
     }
+    doc_types = generators.keys() if args.type == "all" else [args.type]
 
-    types_to_generate = generators.keys() if args.type == "all" else [args.type]
-
-    for doc_type in types_to_generate:
+    for doc_type in doc_types:
         filename, generator = generators[doc_type]
-        content = generator(config)
         output_path = os.path.join(args.output_dir, filename)
-        with open(output_path, "w") as f:
-            f.write(content)
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(generator(config))
         print(f"Generated: {output_path}")
 
-    print(f"\nRegulatory documents generated in {args.output_dir}/")
-    print("\nIMPORTANT: These are templates only. Before any regulatory submission:")
-    print("  1. Engage qualified regulatory affairs professionals")
-    print("  2. Consult legal counsel experienced in SaMD regulation")
-    print("  3. Contact the relevant authority (FDA/Notified Body/MHRA) for pre-submission")
-    print("  4. Fill in all [BRACKETED] sections with your specific data")
+    print("\nThese outputs are experimental scaffolds. Review with qualified regulatory professionals before any external use.")
 
 
 if __name__ == "__main__":

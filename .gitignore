@@ -8,12 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-gpu
 
 # Data cache (Kaggle datasets)
-data/
+data/*
+!data/toy_binary/
+!data/toy_binary/**
 
 # Training artifacts
 run.log
+logs/
 results.tsv
 checkpoints/
 *.pth
@@ -34,6 +38,18 @@ AGENTS.md
 # Dev
 dev/
 worktrees/
+.claude/worktrees/
+.claude/settings.local.json
+TEAM_CLEANUP_HANDOFF.md
+
+# Generated outputs
+paper/generated/
+paper/paper.tex
+regulatory/generated/
+regulatory/output/
+tmp/
+progress.png
+notebooks/.ipynb_checkpoints/
 
 # IDE
 .vscode/

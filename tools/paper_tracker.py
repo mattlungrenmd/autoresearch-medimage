@@ -224,7 +224,7 @@ paper:
   dataset: "{', '.join(paper['datasets']) if paper['datasets'] else 'TODO'}"
   reported_metric: "TODO — check paper"
 
-dataset: TODO  # Set to one of: {', '.join(sorted(set(d.lower() for d in paper['datasets'])))} or add new dataset to prepare.py
+dataset: TODO  # Set to a built-in dataset name or create a custom manifest under data/<dataset>/dataset.yaml
 task: {task}
 
 model:
@@ -252,7 +252,7 @@ augmentation:
 
 notes: |
   Auto-generated from arXiv paper. Review the following:
-  1. Verify dataset name and add to prepare.py if needed
+  1. Verify the dataset name and create a custom dataset manifest if needed
   2. Check reported metrics in the paper
   3. Verify backbone architecture matches paper
   4. Adjust hyperparameters based on paper's methodology section
