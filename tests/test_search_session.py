@@ -1,5 +1,8 @@
+import csv
 import random
+import tempfile
 import unittest
+from pathlib import Path
 
 from tools import run_search_session as rss
 
@@ -40,6 +43,60 @@ class SearchSessionTests(unittest.TestCase):
         mutated, delta = rss.mutate_recipe(recipe, space, "backbone_swap", random.Random(3))
         self.assertEqual(mutated["model"]["backbone"], "efficientnet_b0")
         self.assertEqual(delta["backbone"]["from"], "densenet121")
+
+    def test_build_recipe_stem_stays_compact_for_long_candidate_names(self):
+        stem = rss.build_recipe_stem(
+            "cand0020",
+            "cand0019_cand0016_cand0007_cand0005_chestxray14_frontier_efficientnet_b0_stronger_color_loss_augmentation_regularization",
+            "confirm",
+        )
+        self.assertTrue(stem.startswith("cand0020_"))
+        self.assertLessEqual(len(stem), rss.MAX_RECIPE_STEM)
+        self.assertIn("confirm", stem)
+
+    def test_sync_candidate_from_results_refreshes_pending_candidate(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results_path = Path(tmpdir) / "results.tsv"
+            fieldnames = [
+                "session",
+                "candidate_id",
+                "recipe",
+                "backbone",
+                "metric_name",
+                "metric",
+                "status",
+                "checkpoint_path",
+                "description",
+            ]
+            with open(results_path, "w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "session": "resume_demo",
+                        "candidate_id": "cand0019",
+                        "recipe": "cand0019_cand0016_regularization",
+                        "backbone": "efficientnet_b0",
+                        "metric_name": "mean_auc",
+                        "metric": "82.348437",
+                        "status": "candidate",
+                        "checkpoint_path": "checkpoints/demo.pth",
+                        "description": "demo result row",
+                    }
+                )
+
+            candidate = {
+                "candidate_id": "cand0019",
+                "recipe_name": "old_pending_name",
+                "backbone": "",
+                "status": "pending",
+            }
+            synced = rss.sync_candidate_from_results(results_path, "resume_demo", candidate)
+            self.assertTrue(synced)
+            self.assertEqual(candidate["status"], "candidate")
+            self.assertEqual(candidate["recipe_name"], "cand0019_cand0016_regularization")
+            self.assertAlmostEqual(candidate["metric"], 82.348437)
+            self.assertEqual(candidate["checkpoint_path"], "checkpoints/demo.pth")
 
 
 if __name__ == "__main__":

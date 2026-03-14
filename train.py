@@ -816,9 +816,19 @@ def get_image_size(cfg):
     return int(IMAGE_SIZE_OVERRIDE or cfg["image_size"])
 
 
-def resolve_worker_count():
+def recommended_windows_worker_count(base_workers, batch_size, image_size):
+    worker_count = max(0, min(int(base_workers), 2))
+    pixel_budget = max(1, int(batch_size)) * max(1, int(image_size)) * max(1, int(image_size))
+    if pixel_budget >= 2_000_000:
+        return 0
+    if pixel_budget >= 1_500_000:
+        return min(worker_count, 1)
+    return worker_count
+
+
+def resolve_worker_count(cfg, batch_size):
     if os.name == "nt":
-        return max(0, min(NUM_WORKERS, 2))
+        return recommended_windows_worker_count(NUM_WORKERS, batch_size, get_image_size(cfg))
     return NUM_WORKERS
 
 
@@ -853,7 +863,6 @@ def build_classification_transforms(cfg, train=True):
 
 def build_loader(dataset_name, cfg, batch_size, split="train"):
     is_train = split == "train"
-    worker_count = resolve_worker_count()
     generator = torch.Generator()
     split_offset = {"train": 0, "val": 1, "test": 2}.get(split, 0)
     generator.manual_seed(RUN_SEED + split_offset)
@@ -879,17 +888,24 @@ def build_loader(dataset_name, cfg, batch_size, split="train"):
         )
 
     effective_batch_size = max(1, min(batch_size, len(dataset)))
+    worker_count = resolve_worker_count(cfg, effective_batch_size)
+    loader_kwargs = {
+        "pin_memory": torch.cuda.is_available(),
+        "drop_last": is_train and len(dataset) > effective_batch_size,
+        "persistent_workers": worker_count > 0 and os.name != "nt",
+        "worker_init_fn": seed_worker if worker_count > 0 else None,
+        "generator": generator,
+    }
+    if worker_count > 0 and os.name == "nt":
+        # Windows file-mapping pressure is much more likely to bite large-image overnight runs.
+        loader_kwargs["prefetch_factor"] = 1
 
     return DataLoader(
         dataset,
         batch_size=effective_batch_size,
         shuffle=is_train,
         num_workers=worker_count,
-        pin_memory=torch.cuda.is_available(),
-        drop_last=is_train and len(dataset) > effective_batch_size,
-        persistent_workers=worker_count > 0,
-        worker_init_fn=seed_worker if worker_count > 0 else None,
-        generator=generator,
+        **loader_kwargs,
     )
 
 

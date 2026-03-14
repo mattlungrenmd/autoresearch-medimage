@@ -28,6 +28,7 @@ RESULTS_FILE = REPO_DIR / "results.tsv"
 RECIPES_DIR = REPO_DIR / "recipes"
 SEARCH_SPACES_DIR = REPO_DIR / "search_spaces"
 DEFAULT_ALGO = "adaevolve_lite"
+MAX_RECIPE_STEM = 96
 SEARCH_METADATA_FIELDS = [
     "candidate_id",
     "parent_id",
@@ -67,6 +68,21 @@ def slugify(text: str) -> str:
     while "__" in slug:
         slug = slug.replace("__", "_")
     return slug or "candidate"
+
+
+def compact_slug(text: str, limit: int) -> str:
+    return slugify(text)[:limit].strip("_") or "candidate"
+
+
+def build_recipe_stem(candidate_id: str, *parts: str) -> str:
+    tokens = [candidate_id]
+    for part in parts:
+        part = str(part or "").strip()
+        if not part:
+            continue
+        tokens.append(compact_slug(part, 24))
+    stem = "_".join(tokens).strip("_")
+    return stem[:MAX_RECIPE_STEM].rstrip("_") or candidate_id
 
 
 def load_yaml(path: Path) -> dict:
@@ -500,6 +516,25 @@ def latest_result_for_candidate(results_path: Path, session: str, candidate_id: 
     return {column: row[column] for column in view.columns}
 
 
+def apply_result_row_to_candidate(candidate: dict, row: dict) -> dict:
+    candidate["status"] = normalize_status(row.get("status", "")) or "candidate"
+    candidate["metric"] = safe_float(row.get("metric"))
+    candidate["checkpoint_path"] = str(row.get("checkpoint_path", "") or "")
+    candidate["backbone"] = str(row.get("backbone", "") or candidate.get("backbone", ""))
+    candidate["recipe_name"] = str(row.get("recipe", "") or candidate.get("recipe_name", ""))
+    candidate["metric_name"] = str(row.get("metric_name", "") or "")
+    candidate["description"] = str(row.get("description", "") or "")
+    return candidate
+
+
+def sync_candidate_from_results(results_path: Path, session: str, candidate: dict) -> bool:
+    row = latest_result_for_candidate(results_path, session, str(candidate.get("candidate_id", "")))
+    if row is None:
+        return False
+    apply_result_row_to_candidate(candidate, row)
+    return True
+
+
 def best_known_seed(space: dict, dataset: str, results_path: Path) -> tuple[str, dict] | None:
     df = read_results(results_path)
     if df.empty:
@@ -549,7 +584,7 @@ def initialize_seed_candidates(
         sequence += 1
         candidate_id = f"cand{candidate_counter:04d}"
         branch_key = branch_key_for_backbone(str(recipe.get("model", {}).get("backbone", "")))
-        recipe_name = f"{candidate_id}_{slugify(label)}"
+        recipe_name = build_recipe_stem(candidate_id, label, "seed")
         candidate = {
             "sequence_id": sequence,
             "candidate_id": candidate_id,
@@ -685,7 +720,11 @@ def make_child_candidate(
     state["candidate_counter"] = int(state.get("candidate_counter", 0)) + 1
     state["sequence_counter"] = int(state.get("sequence_counter", 0)) + 1
     candidate_id = f"cand{int(state['candidate_counter']):04d}"
-    recipe_name = f"{candidate_id}_{slugify(parent.get('recipe_name', mutation_op))}_{slugify(mutation_op)}"
+    recipe_name = build_recipe_stem(
+        candidate_id,
+        parent.get("candidate_id", ""),
+        mutation_op,
+    )
     branch_key = branch_key_for_backbone(str(recipe.get("model", {}).get("backbone", "")))
     candidate = {
         "sequence_id": int(state["sequence_counter"]),
@@ -766,21 +805,19 @@ def run_candidate(
         candidate["metric"] = float("nan")
         candidate["failure_reason"] = "missing_result_row"
         return candidate
-    candidate["status"] = normalize_status(row.get("status", "")) or "candidate"
-    candidate["metric"] = safe_float(row.get("metric"))
-    candidate["checkpoint_path"] = str(row.get("checkpoint_path", "") or "")
-    candidate["backbone"] = str(row.get("backbone", "") or candidate.get("backbone", ""))
-    candidate["recipe_name"] = str(row.get("recipe", "") or candidate.get("recipe_name", ""))
-    candidate["metric_name"] = str(row.get("metric_name", "") or "")
-    candidate["description"] = str(row.get("description", "") or "")
-    return candidate
+    return apply_result_row_to_candidate(candidate, row)
 
 
 def create_rerun_candidate(search_dir: Path, state: dict, parent_candidate: dict) -> dict:
     state["candidate_counter"] = int(state.get("candidate_counter", 0)) + 1
     state["sequence_counter"] = int(state.get("sequence_counter", 0)) + 1
     rerun_id = f"cand{int(state['candidate_counter']):04d}"
-    recipe_file = search_dir / "recipes" / f"{rerun_id}_{slugify(parent_candidate['recipe_name'])}_confirm.yaml"
+    recipe_name = build_recipe_stem(
+        rerun_id,
+        parent_candidate.get("candidate_id", ""),
+        "confirm",
+    )
+    recipe_file = search_dir / "recipes" / f"{recipe_name}.yaml"
     recipe_payload = load_yaml(Path(parent_candidate["recipe_file"]))
     recipe_payload["search_metadata"] = {
         "candidate_id": rerun_id,
@@ -798,7 +835,7 @@ def create_rerun_candidate(search_dir: Path, state: dict, parent_candidate: dict
         "parent_id": parent_candidate.get("parent_id", ""),
         "branch_key": parent_candidate.get("branch_key", ""),
         "base_recipe": parent_candidate.get("base_recipe", ""),
-        "recipe_name": recipe_file.stem,
+        "recipe_name": recipe_name,
         "mutation_op": parent_candidate.get("mutation_op", ""),
         "mutation_delta": parent_candidate.get("mutation_delta", {}),
         "search_algo": DEFAULT_ALGO,
@@ -939,7 +976,12 @@ def main():
     parser.add_argument("--session", type=str, required=True, help="Session tag for logs/results")
     parser.add_argument("--space", type=str, default="chestxray14", help="Search space name or explicit YAML path")
     parser.add_argument("--results", type=Path, default=RESULTS_FILE, help="Path to results.tsv")
-    parser.add_argument("--max-runs", type=int, default=None, help="Maximum train.py executions for this session")
+    parser.add_argument(
+        "--max-runs",
+        type=int,
+        default=None,
+        help="Maximum finalized search candidates for this session; confirmation reruns may add extra train.py executions",
+    )
     parser.add_argument("--time-budget", type=float, default=None, help="Optional time budget override passed through to train.py")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed for the outer loop")
     parser.add_argument("--dry-run", action="store_true", help="Initialize/search-plan only without launching train.py")
@@ -994,9 +1036,11 @@ def main():
             print(f"  - {name}")
         return
 
-    runs_completed = 0
-    while runs_completed < max_runs:
+    while int(state.get("completed_runs", 0)) < max_runs:
         pending = pick_pending_candidate(candidates)
+        resumed_from_results = False
+        if pending is not None:
+            resumed_from_results = sync_candidate_from_results(args.results, args.session, pending)
         if pending is None:
             force_explore = int(state.get("non_improving_runs", 0)) >= int(space.get("stagnation_rules", {}).get("explore_after", 8))
             allow_large_jump = int(state.get("non_improving_runs", 0)) >= int(space.get("stagnation_rules", {}).get("refresh_after", 16))
@@ -1024,8 +1068,11 @@ def main():
             save_state(session_dir, state)
             pending = child
 
-        print(f"[search] running {pending['candidate_id']} {pending['recipe_name']}")
-        run_candidate(pending, dataset, args.session, args.results, time_budget=args.time_budget, dry_run=False)
+        if resumed_from_results:
+            print(f"[search] resuming finalized run {pending['candidate_id']} {pending['recipe_name']}")
+        else:
+            print(f"[search] running {pending['candidate_id']} {pending['recipe_name']}")
+            run_candidate(pending, dataset, args.session, args.results, time_budget=args.time_budget, dry_run=False)
         if pending.get("parent_id"):
             parent = next((candidate for candidate in candidates if candidate.get("candidate_id") == pending["parent_id"]), None)
             parent_metric = candidate_score(parent) if parent is not None else float("nan")
@@ -1050,7 +1097,6 @@ def main():
         update_candidate_record(session_dir, candidates)
         save_state(session_dir, state)
         generate_search_report(args.session, results_path=args.results, search_dir=session_dir)
-        runs_completed += 1
 
     print("AdaEvolve-lite session complete:")
     print(f"  session: {args.session}")
