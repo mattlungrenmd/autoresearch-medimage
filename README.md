@@ -13,21 +13,51 @@ This repo supports a simple short-budget search loop, plus optional helpers for
 people who want to validate promising candidates more carefully in later-stage
 benchmark workflows.
 
+## Why Medical Imaging
+
+This is not a generic computer-vision AutoML repo. Public v1 is intentionally
+scoped to labeled **2D medical imaging** tasks such as:
+
+- chest X-ray classification and multilabel pathology detection
+- fundus and OCT image classification
+- binary medical-image segmentation with paired image/mask labels
+
+The repo is designed around the kinds of things medical imaging users actually
+care about:
+
+- explicit `train` / `val` / optional `test` split handling
+- task-appropriate metrics such as `mean_auc`, `auc`, Dice, and quadratic kappa
+- bring-your-own labeled datasets under a simple manifest contract
+- reproducible search loops that are practical on local GPUs or Colab
+
 ## What This Repo Is
 
-- A practical framework for discovering strong candidate models and recipes on built-in and local datasets
+- A practical framework for discovering strong candidate models and recipes on built-in and local **medical imaging** datasets
 - A simple bring-your-own-data contract under `data/<dataset>/`
 - A place for agents to iterate on backbones, losses, and optimization in `train.py`
 - An optional AdaEvolve-lite overnight search mode that stays on top of `train.py`
-- An experimental home for paper and regulatory planning scaffolds
 
 ## Capabilities
 
 | Status | What it means |
 |--------|----------------|
-| Today | 2D classification, multilabel classification, and binary segmentation |
-| Experimental | HuggingFace medical backbones, paper scaffold generation, regulatory scaffolds |
+| Today | 2D medical-image classification, multilabel classification, and binary segmentation |
+| Experimental | HuggingFace medical backbones and optional reporting helpers |
 | Next up | stronger dataset adapters, smoother benchmark workflows, and more public examples |
+
+## Repo Layout
+
+The top-level folders are organized around the medical-imaging workflow:
+
+- `data/`: built-in benchmark data and bring-your-own dataset manifests
+- `recipes/`: reusable baseline and example training recipes
+- `search_spaces/`: adaptive-search spaces for staged discovery/refinement runs
+- `tools/`: experiment orchestration, reporting, cleanup, and promotion helpers
+- `benchmarks/`: literature comparison tables used by the CheXNet and benchmark figures
+- `docs/`: walkthroughs for CheXNet, local runs, Colab, and custom datasets
+- `notebooks/`: Colab-friendly bootstrap notebooks
+- `paper/`: optional figure and manuscript scaffold generators
+- `regulatory/`: optional regulatory-planning scaffold generators
 
 ## Quick Start
 
@@ -49,6 +79,9 @@ uv run train.py --dataset your_dataset
 
 See [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md) for the full contract.
 
+If you already have a labeled medical imaging dataset with image paths and
+split metadata, this is the main entrypoint to adapt the repo to your own task.
+
 For a zero-setup local smoke test, the repo also ships a tiny fixture:
 
 ```bash
@@ -69,7 +102,7 @@ require a valid Kaggle API token in `~/.kaggle/kaggle.json` or the equivalent
 environment variables.
 
 See [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the full
-hello-world flow, including paper and regulatory scaffold generation.
+hello-world flow, including optional reporting artifacts.
 For the overnight agent workflow, see [docs/OVERNIGHT_CHEXNET_RUN.md](docs/OVERNIGHT_CHEXNET_RUN.md).
 For a one-command local compute backbone-first run, see [docs/LOCAL_OVERNIGHT_RUN.md](docs/LOCAL_OVERNIGHT_RUN.md).
 
