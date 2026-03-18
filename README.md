@@ -79,6 +79,9 @@ is specific to benchmark datasets that expose a true final split; the generic
 bring-your-own-data contract still works for any dataset with a valid
 `splits.csv`.
 
+For the original CheXNet paper comparison tables and per-pathology breakdown,
+see [benchmarks/chestxray14.md](benchmarks/chestxray14.md).
+
 ## Cleaning Up Artifacts
 
 Experiment logs and checkpoints grow quickly. The repo now includes a
