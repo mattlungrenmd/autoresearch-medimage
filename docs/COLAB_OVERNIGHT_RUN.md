@@ -7,6 +7,8 @@ If you prefer notebook cells instead of copying commands manually, the repo
 also includes
 [`notebooks/colab_chexnet_overnight.ipynb`](../notebooks/colab_chexnet_overnight.ipynb)
 as a maintained bootstrap notebook for the same flow.
+Direct Colab launch:
+[Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_chexnet_overnight.ipynb).
 
 ## Goal
 
