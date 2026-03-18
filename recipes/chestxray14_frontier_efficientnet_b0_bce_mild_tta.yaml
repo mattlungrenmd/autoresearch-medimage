@@ -1,0 +1,45 @@
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: efficientnet_b0
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 32
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+  label_smoothing: 0.0
+
+loss:
+  type: bce
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 5
+  color_jitter: false
+  clahe: false
+  elastic_transform: false
+  grid_distortion: false
+  coarse_dropout: false
+  coarse_dropout_ratio: 0.1
+
+advanced:
+  ema: false
+  ema_decay: 0.999
+  tta: true
+  compile: true
+  lr_schedule: cosine
+
+image_size: 224
+
+notes: |
+  Strong EfficientNet-B0 cold-start seed discovered by the adaptive search:
+  BCE loss, mild spatial augmentation, and TTA enabled under the fixed
+  300-second budget.

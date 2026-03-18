@@ -1,0 +1,35 @@
+dataset: chestxray14
+task: multilabel
+
+model:
+  backbone: densenet169
+  pretrained: true
+  dropout: 0.2
+
+training:
+  batch_size: 16
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: focal
+  focal_gamma: 2.0
+  class_weights: true
+
+augmentation:
+  horizontal_flip: true
+  vertical_flip: false
+  rotation: 10
+  color_jitter: true
+  color_jitter_brightness: 0.1
+  color_jitter_contrast: 0.1
+
+image_size: 224
+
+notes: |
+  Architecture-first frontier recipe for a fixed 300-second ChestX-ray14 run.
+  DenseNet-169 keeps the DenseNet family but spends more capacity than the
+  classic CheXNet backbone.

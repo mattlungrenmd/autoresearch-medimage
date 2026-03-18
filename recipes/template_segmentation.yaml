@@ -1,0 +1,23 @@
+# Template: custom binary segmentation baseline
+# Public v1 segmentation support is binary foreground/background.
+
+dataset: your_dataset
+task: segmentation
+
+model:
+  architecture: unet
+  base_channels: 64
+  pretrained: false
+
+training:
+  batch_size: 8
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  warmup_ratio: 0.05
+  warmdown_ratio: 0.3
+
+loss:
+  type: dice_bce
+
+image_size: 256
