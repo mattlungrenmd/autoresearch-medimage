@@ -101,6 +101,8 @@ def main():
     parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--progress-output", type=str, default=None, help="Optional progress PNG path")
     parser.add_argument("--paper-output", type=str, default=None, help="Optional paper .tex output path")
+    parser.add_argument("--final-eval-output", type=str, default=None, help="Optional held-out evaluation payload path")
+    parser.add_argument("--figures-output-dir", type=str, default=None, help="Optional figures output directory")
     parser.add_argument("--reg-output-dir", type=str, default=None, help="Optional regulatory output directory")
     parser.add_argument("--compile-paper", action="store_true", help="Attempt LaTeX compilation if pdflatex is available")
     args = parser.parse_args()
@@ -118,7 +120,12 @@ def main():
     paper_output = os.path.abspath(
         args.paper_output or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_overnight.tex")
     )
-    final_eval_output = os.path.abspath(os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_final_eval.pt"))
+    final_eval_output = os.path.abspath(
+        args.final_eval_output or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_final_eval.pt")
+    )
+    figures_dir = os.path.abspath(
+        args.figures_output_dir or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_figures")
+    )
     reg_output_dir = os.path.abspath(
         args.reg_output_dir or os.path.join(REPO_DIR, "regulatory", "generated", f"{dataset_name}_overnight")
     )
@@ -140,7 +147,6 @@ def main():
         REPO_DIR,
     )
 
-    figures_dir = os.path.abspath(os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_figures"))
     if dataset_has_split(dataset_name, "test") and str(winner.get("checkpoint_path", "")).strip():
         run_command(
             [

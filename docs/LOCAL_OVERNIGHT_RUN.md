@@ -62,6 +62,94 @@ uv run python tools/run_search_session.py `
 That mode still uses `train.py` for every scored run, but it writes generated
 overlay recipes plus lineage/search state under `logs/<session>/search/`.
 
+## Optional Staged Pattern
+
+If you want a more benchmark-oriented follow-up after the initial overnight
+search, a useful next step is:
+
+1. broad short-budget search
+2. refinement search around the top diverse candidates
+3. longer promotion runs for the finalists
+
+The default `300s` budget is still the baseline. If you want a stronger stage-1
+screening budget on local GPU, use `--time-budget 900` explicitly.
+
+### Stage 1: Broad search
+
+```bash
+uv run python tools/run_search_session.py `
+  --space chestxray14 `
+  --session $env:SESSION `
+  --time-budget 900
+```
+
+### Stage 2: Materialize a refinement search space from the top diverse candidates
+
+```bash
+uv run python tools/build_refinement_space.py `
+  --session $env:SESSION `
+  --space chestxray14 `
+  --top-k 5 `
+  --diverse-by branch `
+  --output "logs/${env:SESSION}_refine/refinement_space.yaml"
+
+uv run python tools/run_search_session.py `
+  --space "logs/${env:SESSION}_refine/refinement_space.yaml" `
+  --session "${env:SESSION}_refine" `
+  --time-budget 1800
+```
+
+If your finalists already live in separate promoted sessions, you can skip the
+single-session selection step and seed refinement directly from those winners:
+
+```bash
+uv run python tools/build_refinement_space.py `
+  --seed-session cand0056_fulltrain_ep10 `
+  --seed-session cand0026_fulltrain_ep10 `
+  --seed-session cand0003_fulltrain_ep10 `
+  --space chestxray14 `
+  --mutation-family lr_wd `
+  --mutation-family optimizer_scheduler `
+  --mutation-family batch_image `
+  --mutation-family regularization `
+  --mutation-family augmentation `
+  --mutation-family loss `
+  --max-runs 24 `
+  --output "logs/chestxray14_stage2_refine/refinement_space.yaml"
+```
+
+### Stage 3: Run longer validation on the refined finalists
+
+To compare the best diverse refined candidates under a longer horizon:
+
+```bash
+uv run python tools/run_full_train_queue.py `
+  --session "${env:SESSION}_refine" `
+  --top-k 3 `
+  --diverse-by branch `
+  --epochs 10
+```
+
+If your CUDA environment is separate from this repo checkout, add
+`--python-executable C:\path\to\python.exe` so the queue launches `train.py`
+with that interpreter while still using the current workspace files.
+
+To validate only the single best refined candidate:
+
+```bash
+uv run python tools/run_full_train.py `
+  --session "${env:SESSION}_refine" `
+  --epochs 10 `
+  --train-session "${env:SESSION}_refine_fulltrain"
+```
+
+Every promoted run now writes its own `launcher.log` and `launcher.err.log`
+under `logs/<train_session>/full_train/`, which makes the long-run lane much
+easier to monitor and resume.
+
+Treat these stage-3 runs as validation of promising candidates, not as proof
+that the short overnight search already found the final winner.
+
 ## Recommended Command
 
 Choose a fresh session tag:

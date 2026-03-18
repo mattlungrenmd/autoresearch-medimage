@@ -1,7 +1,7 @@
 dataset: chestxray14
 task: multilabel
 primary_metric: mean_auc
-default_max_runs: 16
+default_max_runs: 24
 
 seed_recipes:
   - chexnet_improved
@@ -9,6 +9,7 @@ seed_recipes:
   - chestxray14_frontier_resnet50
   - chestxray14_frontier_convnext_tiny_stronger_color
   - chestxray14_frontier_efficientnet_b0_stronger_color
+  - chestxray14_frontier_efficientnet_b0_bce_mild_tta
   - chestxray14_frontier_efficientnet_b1_stronger_color
 
 backbone_pool:
@@ -29,7 +30,7 @@ mutation_families:
   - loss
 
 ranges:
-  learning_rate: [0.0001, 0.0003, 0.0005, 0.001, 0.003]
+  learning_rate: [0.0001, 0.0002, 0.0003, 0.0005, 0.001]
   weight_decay: [0.0, 0.00001, 0.0001, 0.001, 0.01]
   dropout: [0.1, 0.2, 0.3, 0.4]
   batch_size: [8, 16, 24, 32]
@@ -71,6 +72,30 @@ categorical_choices:
       grid_distortion: true
       coarse_dropout: true
       coarse_dropout_ratio: 0.1
+
+phase_families:
+  default:
+    - loss
+    - augmentation
+    - regularization
+    - lr_wd
+  explore:
+    - loss
+    - augmentation
+    - regularization
+    - lr_wd
+    - optimizer_scheduler
+  refresh:
+    - loss
+    - augmentation
+    - regularization
+    - lr_wd
+    - optimizer_scheduler
+    - backbone_swap
+
+operator_reward:
+  clip: 2.0
+  crash_penalty: -1.5
 
 gating_thresholds:
   immediate_keep_delta: 0.25

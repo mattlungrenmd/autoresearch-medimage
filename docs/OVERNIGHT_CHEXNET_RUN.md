@@ -62,7 +62,7 @@ Session setup:
 - held-out test is reserved for finalization only
 
 Mission:
-Improve the kept chestxray14 validation mean_auc over an overnight run on available local compute or a hosted notebook GPU, while staying faithful to the autoresearch workflow.
+Improve the kept chestxray14 validation mean_auc over an overnight run on available local compute or a hosted notebook GPU, while staying faithful to the autoresearch workflow and treating the result as a candidate-discovery stage rather than an automatic final ranking.
 
 Hard rules:
 - Do not modify prepare.py.
@@ -156,3 +156,33 @@ By default the finalize step refreshes:
 - `regulatory/generated/chestxray14_overnight/`
 
 Those are the main artifacts to review in the morning.
+
+## Optional Medical Imaging Follow-Up
+
+For a faithful Karpathy-style overnight run, the instructions above are enough.
+If you want a more benchmark-oriented medical-imaging workflow, treat that
+overnight session as stage 1 rather than the final ranking:
+
+1. run the short-budget overnight search
+2. build a refinement search space from the top diverse candidates
+3. run a longer-budget refinement session
+4. promote the best refined candidates into longer full-train runs
+
+Example:
+
+```bash
+uv run python tools/build_refinement_space.py --session chexnet_overnight_20260310 --space chestxray14 --top-k 5 --diverse-by branch --output logs/chexnet_overnight_20260310_refine/refinement_space.yaml
+uv run python tools/run_search_session.py --space logs/chexnet_overnight_20260310_refine/refinement_space.yaml --session chexnet_overnight_20260310_refine --time-budget 1800
+uv run python tools/run_full_train_queue.py --session chexnet_overnight_20260310_refine --top-k 3 --diverse-by branch --epochs 10
+```
+
+If your strongest promoted checkpoints already sit in separate sessions, the
+same helper can seed a refinement space directly from those winner sessions:
+
+```bash
+uv run python tools/build_refinement_space.py --seed-session cand0056_fulltrain_ep10 --seed-session cand0026_fulltrain_ep10 --seed-session cand0003_fulltrain_ep10 --space chestxray14 --mutation-family lr_wd --mutation-family optimizer_scheduler --mutation-family batch_image --mutation-family regularization --mutation-family augmentation --mutation-family loss --max-runs 24 --output logs/chestxray14_stage2_refine/refinement_space.yaml
+```
+
+This repo keeps the short fixed wall-clock loop because it is still a useful
+screening contract. The optional follow-up exists for cases where slower
+backbone families need more time before the final ranking is trustworthy.

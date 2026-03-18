@@ -14,6 +14,7 @@ Usage:
     uv run train.py --recipe aptos_winner              # Kaggle-winning DR approach
     uv run train.py --dataset aptos                    # DR grading (manual config)
     uv run train.py --dataset brain_mri                # Brain tumor segmentation
+    uv run train.py --recipe chexnet --epochs 10       # Optional full-train mode
     uv run train.py --save-checkpoint                  # Save best model
 """
 
@@ -315,6 +316,8 @@ RESULTS_HEADER = [
     "augmentations",
     "seed",
     "time_budget_seconds",
+    "budget_mode",
+    "epoch_budget",
     "metric_name",
     "metric",
     "memory_gb",
@@ -330,6 +333,8 @@ RESULTS_HEADER = [
     "failure_reason",
 ]
 RUN_TIME_BUDGET = TIME_BUDGET
+RUN_BUDGET_MODE = "time"
+RUN_EPOCH_BUDGET = None
 CURRENT_RUN_DATASET = DATASET
 CURRENT_RUN_RECIPE = ""
 CURRENT_RUN_BACKBONE = BACKBONE
@@ -404,7 +409,9 @@ def current_results_metadata(cfg, loss_type, batch_size=None):
         "dropout": f"{DROPOUT:.4f}",
         "augmentations": summarize_augmentations(),
         "seed": str(RUN_SEED),
-        "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}",
+        "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}" if RUN_BUDGET_MODE == "time" else "",
+        "budget_mode": RUN_BUDGET_MODE,
+        "epoch_budget": str(RUN_EPOCH_BUDGET or ""),
         **{key: stringify_results_value(value) for key, value in search_metadata.items()},
     }
 
@@ -821,7 +828,7 @@ def recommended_windows_worker_count(base_workers, batch_size, image_size):
     pixel_budget = max(1, int(batch_size)) * max(1, int(image_size)) * max(1, int(image_size))
     if pixel_budget >= 2_000_000:
         return 0
-    if pixel_budget >= 1_500_000:
+    if pixel_budget >= 1_000_000:
         return min(worker_count, 1)
     return worker_count
 
@@ -909,8 +916,8 @@ def build_loader(dataset_name, cfg, batch_size, split="train"):
     )
 
 
-def build_infinite_loader(dataset_name, cfg, batch_size, split="train"):
-    loader = build_loader(dataset_name, cfg, batch_size, split=split)
+def build_infinite_loader(dataset_name, cfg, batch_size, split="train", loader=None):
+    loader = loader or build_loader(dataset_name, cfg, batch_size, split=split)
     epoch = 1
     while True:
         for batch in loader:
@@ -1408,6 +1415,7 @@ def build_run_description(dataset_name, cfg, recipe_name, backbone_name, loss_ty
             f"wd={WEIGHT_DECAY:.2e}",
             f"drop={DROPOUT:g}",
             f"aug={summarize_augmentations()}",
+            f"budget={RUN_EPOCH_BUDGET}ep" if RUN_BUDGET_MODE == "epochs" else f"budget={RUN_TIME_BUDGET:.0f}s",
         ]
     )
     if CURRENT_RUN_METADATA.get("mutation_op"):
@@ -1446,7 +1454,9 @@ def build_effective_config(
         "recipe_source": CURRENT_RUN_RECIPE_SOURCE,
         "session": CURRENT_RUN_SESSION,
         "seed": RUN_SEED,
-        "time_budget_seconds": RUN_TIME_BUDGET,
+        "time_budget_seconds": RUN_TIME_BUDGET if RUN_BUDGET_MODE == "time" else None,
+        "budget_mode": RUN_BUDGET_MODE,
+        "epoch_budget": RUN_EPOCH_BUDGET,
         "selection_split": "val",
         "image_size": get_image_size(cfg),
         "model": {
@@ -1566,6 +1576,7 @@ def primary_metric_for_results(results, cfg):
 def main():
     global CURRENT_RUN_DATASET, CURRENT_RUN_RECIPE, CURRENT_RUN_BACKBONE, CURRENT_RUN_SESSION
     global CURRENT_RUN_METADATA, CURRENT_RUN_RECIPE_SOURCE, RUN_TIME_BUDGET
+    global RUN_BUDGET_MODE, RUN_EPOCH_BUDGET
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument(
@@ -1592,6 +1603,12 @@ def main():
         help="Optional override for smoke tests. Defaults to the 300s autoresearch budget.",
     )
     parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Optional epoch budget for a full-train refinement run. Keeps search-time 300s mode unchanged unless explicitly set.",
+    )
+    parser.add_argument(
         "--session",
         type=str,
         default=None,
@@ -1612,6 +1629,8 @@ def main():
 
     if args.recipe and args.recipe_file:
         raise ValueError("Use either --recipe or --recipe-file, not both")
+    if args.time_budget is not None and args.epochs is not None:
+        raise ValueError("Use either --time-budget or --epochs, not both")
 
     recipe = None
     recipe_source = ""
@@ -1637,8 +1656,14 @@ def main():
     CURRENT_RUN_DATASET = dataset
     CURRENT_RUN_RECIPE = run_recipe_name
     CURRENT_RUN_SESSION = (args.session or "").strip()
-    RUN_TIME_BUDGET = float(args.time_budget) if args.time_budget is not None else float(TIME_BUDGET)
-    if RUN_TIME_BUDGET <= 0:
+    RUN_EPOCH_BUDGET = int(args.epochs) if args.epochs is not None else None
+    if RUN_EPOCH_BUDGET is not None and RUN_EPOCH_BUDGET <= 0:
+        raise ValueError("--epochs must be positive")
+    RUN_BUDGET_MODE = "epochs" if RUN_EPOCH_BUDGET is not None else "time"
+    RUN_TIME_BUDGET = 0.0 if RUN_BUDGET_MODE == "epochs" else (
+        float(args.time_budget) if args.time_budget is not None else float(TIME_BUDGET)
+    )
+    if RUN_BUDGET_MODE == "time" and RUN_TIME_BUDGET <= 0:
         raise ValueError("--time-budget must be positive")
     cfg = get_dataset_config(dataset)
     task = cfg["task"]
@@ -1695,7 +1720,10 @@ def main():
     print(f"Model: {backbone_name}")
     print(f"Pretrained: {PRETRAINED}")
     print(f"Parameters: {num_params:,}")
-    print(f"Time budget: {RUN_TIME_BUDGET}s")
+    if RUN_BUDGET_MODE == "epochs":
+        print(f"Epoch budget: {RUN_EPOCH_BUDGET}")
+    else:
+        print(f"Time budget: {RUN_TIME_BUDGET}s")
     print(f"Batch size: {batch_size}")
     print(f"Optimizer: {OPTIMIZER}")
     print(f"Learning rate: {LEARNING_RATE}")
@@ -1763,7 +1791,10 @@ def main():
     if args.dump_effective_config:
         dump_effective_config(args.dump_effective_config, effective_config)
 
-    train_loader = build_infinite_loader(dataset, cfg, batch_size, split="train")
+    train_epoch_loader = build_loader(dataset, cfg, batch_size, split="train")
+    steps_per_epoch = max(len(train_epoch_loader), 1)
+    total_step_budget = steps_per_epoch * RUN_EPOCH_BUDGET if RUN_EPOCH_BUDGET is not None else None
+    train_loader = build_infinite_loader(dataset, cfg, batch_size, split="train", loader=train_epoch_loader)
     val_loader = build_loader(dataset, cfg, batch_size, split="val")
     images, targets, epoch = next(train_loader)
 
@@ -1787,7 +1818,10 @@ def main():
 
         scaler.scale(loss).backward()
 
-        progress = min(total_training_time / RUN_TIME_BUDGET, 1.0)
+        if RUN_BUDGET_MODE == "epochs":
+            progress = min(step / max(total_step_budget, 1), 1.0)
+        else:
+            progress = min(total_training_time / RUN_TIME_BUDGET, 1.0)
         lrm = get_lr_multiplier(progress)
         for param_group in optimizer.param_groups:
             param_group["lr"] = LEARNING_RATE * lrm
@@ -1809,22 +1843,29 @@ def main():
         t1 = time.time()
         dt = t1 - t0
 
-        if step > 5:
+        if RUN_BUDGET_MODE == "epochs":
+            total_training_time += dt
+        elif step > 5:
             total_training_time += dt
 
         ema_beta = 0.9
         smooth_train_loss = ema_beta * smooth_train_loss + (1 - ema_beta) * train_loss_f
         debiased_smooth_loss = smooth_train_loss / (1 - ema_beta ** (step + 1))
         pct_done = 100 * progress
-        remaining = max(0.0, RUN_TIME_BUDGET - total_training_time)
+        display_epoch = epoch if RUN_BUDGET_MODE == "time" else min((step // steps_per_epoch) + 1, RUN_EPOCH_BUDGET)
+        if RUN_BUDGET_MODE == "epochs":
+            remaining_steps = max(0, total_step_budget - step)
+            remaining_display = f"{remaining_steps / steps_per_epoch:.1f}ep"
+        else:
+            remaining_display = f"{max(0.0, RUN_TIME_BUDGET - total_training_time):.0f}s"
 
         print(
             f"\rstep {step:05d} ({pct_done:.1f}%) | "
             f"loss: {debiased_smooth_loss:.4f} | "
             f"lr: {LEARNING_RATE * lrm:.6f} | "
             f"dt: {dt * 1000:.0f}ms | "
-            f"epoch: {epoch} | "
-            f"remaining: {remaining:.0f}s    ",
+            f"epoch: {display_epoch} | "
+            f"remaining: {remaining_display}    ",
             end="",
             flush=True,
         )
@@ -1837,7 +1878,10 @@ def main():
             gc.collect()
 
         step += 1
-        if step > 5 and total_training_time >= RUN_TIME_BUDGET:
+        if RUN_BUDGET_MODE == "epochs":
+            if step >= total_step_budget:
+                break
+        elif step > 5 and total_training_time >= RUN_TIME_BUDGET:
             break
 
     print()
@@ -1869,12 +1913,15 @@ def main():
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024 if device.type == "cuda" else 0.0
     memory_gb = peak_vram_mb / 1024.0
 
+    completed_epochs = epoch if RUN_BUDGET_MODE == "time" else math.ceil(step / max(steps_per_epoch, 1))
     print(f"training_seconds: {total_training_time:.1f}")
     print(f"total_seconds:    {t_end - t_start:.1f}")
     print(f"peak_vram_mb:     {peak_vram_mb:.1f}")
     print(f"num_steps:        {step}")
     print(f"num_params_M:     {num_params / 1e6:.1f}")
-    print(f"num_epochs:       {epoch}")
+    print(f"num_epochs:       {completed_epochs}")
+    if RUN_BUDGET_MODE == "epochs":
+        print(f"epoch_budget:     {RUN_EPOCH_BUDGET}")
     print(f"dataset:          {dataset}")
     if CURRENT_RUN_SESSION:
         print(f"session:          {CURRENT_RUN_SESSION}")
@@ -1910,7 +1957,13 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         try:
-            crash_metadata = {"session": CURRENT_RUN_SESSION or "", "seed": str(RUN_SEED)}
+            crash_metadata = {
+                "session": CURRENT_RUN_SESSION or "",
+                "seed": str(RUN_SEED),
+                "budget_mode": RUN_BUDGET_MODE,
+                "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}" if RUN_BUDGET_MODE == "time" else "",
+                "epoch_budget": str(RUN_EPOCH_BUDGET or ""),
+            }
             for key, value in CURRENT_RUN_METADATA.items():
                 if key in RESULTS_HEADER:
                     crash_metadata[key] = stringify_results_value(value)

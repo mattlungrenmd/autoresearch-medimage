@@ -122,6 +122,16 @@ def tracked_recipe_exists(recipe_name: str) -> bool:
     return tracked_recipe_path(recipe_name).exists()
 
 
+def resolve_seed_recipe_file(space: dict, recipe_path: str) -> Path:
+    path = Path(str(recipe_path or "")).expanduser()
+    if path.is_absolute():
+        return path
+    space_path = Path(str(space.get("_path", "") or "")).expanduser()
+    if space_path:
+        return (space_path.parent / path).resolve()
+    return path.resolve()
+
+
 def branch_key_for_backbone(backbone: str) -> str:
     text = str(backbone or "").lower()
     for prefix in ("densenet", "efficientnet", "convnext", "resnet"):
@@ -145,8 +155,19 @@ def choose_from_ladder(current, values, rng: random.Random, prefer_far: bool = F
     if not choices:
         return current
     if prefer_far:
-        choices = sorted(choices, key=lambda item: abs(float(item) - float(current)), reverse=True)
-        return choices[0]
+        if current in ladder:
+            current_index = ladder.index(current)
+            ranked = sorted(
+                choices,
+                key=lambda item: (abs(ladder.index(item) - current_index), str(item)),
+                reverse=True,
+            )
+            return ranked[0]
+        try:
+            ranked = sorted(choices, key=lambda item: abs(float(item) - float(current)), reverse=True)
+            return ranked[0]
+        except (TypeError, ValueError):
+            return sorted(choices, key=lambda item: str(item), reverse=True)[0]
     return rng.choice(choices)
 
 
@@ -308,10 +329,13 @@ def row_to_recipe(row: pd.Series) -> dict | None:
 
 
 def resolve_space_path(space_name_or_path: str) -> Path:
-    raw = Path(space_name_or_path)
+    text = str(space_name_or_path or "").strip().strip('"').strip("'")
+    raw = Path(text).expanduser()
     if raw.exists():
         return raw.resolve()
-    return (SEARCH_SPACES_DIR / f"{space_name_or_path}.yaml").resolve()
+    if raw.is_absolute() or raw.suffix or any(sep in text for sep in ("\\", "/")):
+        return raw.resolve()
+    return (SEARCH_SPACES_DIR / f"{text}.yaml").resolve()
 
 
 def load_search_space(space_name_or_path: str) -> dict:
@@ -328,6 +352,27 @@ def ucb_score(stat: dict, total_trials: int, exploration: float = 0.15) -> float
     reward_sum = float(stat.get("reward_sum", 0.0))
     mean_reward = reward_sum / trials if trials else 0.0
     return mean_reward + exploration * math.sqrt(math.log(total_trials + 1.0) / (trials + 1.0))
+
+
+def candidate_timeout_seconds(time_budget: float | None) -> float | None:
+    if time_budget is None:
+        return None
+    budget = max(1.0, float(time_budget))
+    # Allow time for post-train evaluation/TTA while still recovering from hung workers.
+    return max(900.0, budget * 2.0 + 240.0)
+
+
+def family_pool_for_phase(space: dict, force_explore: bool = False, allow_large_jump: bool = False) -> list[str]:
+    phase_families = space.get("phase_families", {})
+    if not isinstance(phase_families, dict):
+        return list(space.get("mutation_families", []))
+    if allow_large_jump and phase_families.get("refresh"):
+        return list(phase_families["refresh"])
+    if force_explore and phase_families.get("explore"):
+        return list(phase_families["explore"])
+    if phase_families.get("default"):
+        return list(phase_families["default"])
+    return list(space.get("mutation_families", []))
 
 
 def select_family(
@@ -566,11 +611,12 @@ def initialize_seed_candidates(
     seen_labels = set()
     seed_specs: list[tuple[str, dict, str]] = []
 
-    best_seed = best_known_seed(space, dataset, results_path)
-    if best_seed is not None:
-        label, recipe = best_seed
-        seed_specs.append((label, recipe, "best_known"))
-        seen_labels.add(label)
+    if bool(space.get("include_best_known_seed", True)):
+        best_seed = best_known_seed(space, dataset, results_path)
+        if best_seed is not None:
+            label, recipe = best_seed
+            seed_specs.append((label, recipe, "best_known"))
+            seen_labels.add(label)
 
     for recipe_name in space.get("seed_recipes", []):
         if recipe_name in seen_labels:
@@ -578,6 +624,16 @@ def initialize_seed_candidates(
         if tracked_recipe_exists(recipe_name):
             seed_specs.append((recipe_name, load_yaml(tracked_recipe_path(recipe_name)), "tracked_recipe"))
             seen_labels.add(recipe_name)
+
+    for recipe_path in space.get("seed_recipe_files", []):
+        resolved_path = resolve_seed_recipe_file(space, str(recipe_path))
+        if not resolved_path.exists():
+            continue
+        label = resolved_path.stem
+        if label in seen_labels:
+            continue
+        seed_specs.append((label, load_yaml(resolved_path), "seed_recipe_file"))
+        seen_labels.add(label)
 
     for label, recipe, source in seed_specs:
         candidate_counter += 1
@@ -794,8 +850,25 @@ def run_candidate(
     if time_budget is not None:
         command.extend(["--time-budget", str(time_budget)])
     candidate["timestamp_started"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    timeout_seconds = candidate_timeout_seconds(time_budget)
     with open(log_path, "w", encoding="utf-8") as handle:
-        result = subprocess.run(command, cwd=REPO_DIR, stdout=handle, stderr=subprocess.STDOUT, text=True)
+        try:
+            result = subprocess.run(
+                command,
+                cwd=REPO_DIR,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            handle.write(f"\n[search] candidate timed out after {int(timeout_seconds or 0)}s\n")
+            candidate["timestamp_finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            candidate["returncode"] = 124
+            candidate["status"] = "crash"
+            candidate["metric"] = float("nan")
+            candidate["failure_reason"] = f"subprocess_timeout_{int(timeout_seconds or 0)}s"
+            return candidate
     candidate["timestamp_finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     candidate["returncode"] = result.returncode
 
@@ -803,7 +876,7 @@ def run_candidate(
     if row is None:
         candidate["status"] = "crash"
         candidate["metric"] = float("nan")
-        candidate["failure_reason"] = "missing_result_row"
+        candidate["failure_reason"] = f"returncode_{result.returncode}" if result.returncode != 0 else "missing_result_row"
         return candidate
     return apply_result_row_to_candidate(candidate, row)
 
@@ -957,9 +1030,16 @@ def pick_pending_candidate(candidates: list[dict]) -> dict | None:
 
 
 def applicable_families(space: dict, recipe: dict) -> list[str]:
+    return filtered_families_for_phase(space, recipe)
+
+
+def filtered_families_for_phase(space: dict, recipe: dict, force_explore: bool = False, allow_large_jump: bool = False) -> list[str]:
     families = []
     task = str(recipe.get("task", space.get("task", ""))).lower()
+    allowed = set(family_pool_for_phase(space, force_explore=force_explore, allow_large_jump=allow_large_jump))
     for family in space.get("mutation_families", []):
+        if family not in allowed:
+            continue
         if family == "loss" and task == "segmentation":
             continue
         families.append(family)
@@ -968,6 +1048,22 @@ def applicable_families(space: dict, recipe: dict) -> list[str]:
 
 def operator_stats_template(space: dict) -> dict:
     return {family: {"trials": 0, "reward_sum": 0.0} for family in space.get("mutation_families", [])}
+
+
+def bounded_operator_reward(parent_metric: float, child_metric: float, candidate: dict, space: dict) -> float:
+    reward_cfg = space.get("operator_reward", {})
+    clip = abs(float(reward_cfg.get("clip", 2.0)))
+    crash_penalty = float(reward_cfg.get("crash_penalty", -1.5))
+    status = normalize_status(candidate.get("status"))
+    if status == "crash" or math.isnan(child_metric):
+        reward = crash_penalty
+    elif math.isnan(parent_metric):
+        reward = 0.0
+    else:
+        reward = child_metric - parent_metric
+    if clip > 0:
+        reward = max(-clip, min(clip, reward))
+    return reward
 
 
 def main():
@@ -1049,7 +1145,12 @@ def main():
             parent = select_parent(candidates, state, space, rng)
             base_recipe = load_yaml(Path(parent["recipe_file"]))
             base_recipe.pop("search_metadata", None)
-            families = applicable_families(space, base_recipe)
+            families = filtered_families_for_phase(
+                space,
+                base_recipe,
+                force_explore=force_explore,
+                allow_large_jump=allow_large_jump,
+            )
             family = select_family(families, state["operator_stats"], rng, force_explore=force_explore)
             child_recipe, mutation_delta = mutate_recipe(base_recipe, space, family, rng, allow_large_jump=allow_large_jump)
             child = make_child_candidate(
@@ -1077,7 +1178,7 @@ def main():
             parent = next((candidate for candidate in candidates if candidate.get("candidate_id") == pending["parent_id"]), None)
             parent_metric = candidate_score(parent) if parent is not None else float("nan")
             child_metric = safe_float(pending.get("metric"))
-            reward = 0.0 if math.isnan(parent_metric) or math.isnan(child_metric) else child_metric - parent_metric
+            reward = bounded_operator_reward(parent_metric, child_metric, pending, space)
             stat = state["operator_stats"].setdefault(pending["mutation_op"], {"trials": 0, "reward_sum": 0.0})
             stat["trials"] = int(stat.get("trials", 0)) + 1
             stat["reward_sum"] = float(stat.get("reward_sum", 0.0)) + reward

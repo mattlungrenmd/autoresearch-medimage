@@ -152,6 +152,87 @@ families instead of walking a fixed queue:
 This keeps `train.py` as the execution surface and writes search-sidecar
 artifacts under `logs/<session>/search/`.
 
+### 7d. Optional: Stage The Search
+
+If you want a more careful benchmark-style follow-up, a useful pattern is:
+
+1. broad stage-1 search
+2. refinement search around the top diverse candidates
+3. longer promotion runs for the finalists
+
+If your Colab GPU budget allows it, a stronger stage-1 screen is often worth
+trying:
+
+```bash
+%cd /content/autoresearch-medimage-colab
+!uv run python tools/run_search_session.py \
+  --space chestxray14 \
+  --session $SESSION \
+  --time-budget 900
+```
+
+Then materialize a refinement space from the top diverse stage-1 candidates:
+
+```bash
+%cd /content/autoresearch-medimage-colab
+!uv run python tools/build_refinement_space.py \
+  --session $SESSION \
+  --space chestxray14 \
+  --top-k 5 \
+  --diverse-by branch \
+  --output logs/${SESSION}_refine/refinement_space.yaml
+
+!uv run python tools/run_search_session.py \
+  --space logs/${SESSION}_refine/refinement_space.yaml \
+  --session ${SESSION}_refine \
+  --time-budget 1800
+```
+
+If your best promoted candidates already live in separate sessions, you can
+seed refinement directly from those winner sessions instead:
+
+```bash
+%cd /content/autoresearch-medimage-colab
+!uv run python tools/build_refinement_space.py \
+  --seed-session cand0056_fulltrain_ep10 \
+  --seed-session cand0026_fulltrain_ep10 \
+  --seed-session cand0003_fulltrain_ep10 \
+  --space chestxray14 \
+  --mutation-family lr_wd \
+  --mutation-family optimizer_scheduler \
+  --mutation-family batch_image \
+  --mutation-family regularization \
+  --mutation-family augmentation \
+  --mutation-family loss \
+  --max-runs 24 \
+  --output logs/chestxray14_stage2_refine/refinement_space.yaml
+```
+
+Finally, run longer validation on the refined finalists:
+
+```bash
+%cd /content/autoresearch-medimage-colab
+!uv run python tools/run_full_train_queue.py \
+  --session ${SESSION}_refine \
+  --top-k 3 \
+  --diverse-by branch \
+  --epochs 10
+```
+
+If you are driving the promotion queue from one environment but want the actual
+training runs to use a different Python interpreter, pass
+`--python-executable /path/to/python`.
+
+If you only want the single best refined candidate instead:
+
+```bash
+%cd /content/autoresearch-medimage-colab
+!uv run python tools/run_full_train.py \
+  --session ${SESSION}_refine \
+  --epochs 10 \
+  --train-session ${SESSION}_refine_fulltrain
+```
+
 ### 8. Sync Artifacts Back to Drive
 
 ```bash
@@ -210,12 +291,9 @@ clean architecture-first sweep on Colab, use the queue helper directly:
   --session $SESSION
 ```
 
-After the frontier finishes:
-
-1. if a new backbone beats the current best, start a fresh Colab session tag for
-   mutations around that winner
-2. if nothing beats the current best, stop the Colab lane and keep the artifacts
-   as a clean negative result
+After the frontier finishes, the medical-imaging workflow should usually move
+into the staged path above instead of immediately trusting the best short-budget
+row as the final winner.
 
 ## Recovery After Colab Disconnects
 
