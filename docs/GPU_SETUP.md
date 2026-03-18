@@ -37,7 +37,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 - **Setup**:
 ```python
 # Kaggle notebook - datasets auto-available
-!git clone https://github.com/<your-username>/autoresearch-medimage
+!git clone https://github.com/mlungrengmail/autoresearch-medimage
 %cd autoresearch-medimage
 !pip install -e .
 # Kaggle datasets are pre-mounted at /kaggle/input/
