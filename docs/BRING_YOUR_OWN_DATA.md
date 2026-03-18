@@ -1,6 +1,6 @@
 # Bring Your Own Data
 
-`autoresearch-medvision` can train on local datasets without editing source
+`autoresearch-medimage` can train on local datasets without editing source
 code when the dataset follows the repo contract.
 
 ## Folder Layout

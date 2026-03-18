@@ -1,6 +1,6 @@
 # Roadmap
 
-This roadmap is scoped to the public release of `autoresearch-medvision` as an
+This roadmap is scoped to the public release of `autoresearch-medimage` as an
 agent-first medical imaging research framework.
 
 ## Phase 1: Public Preview

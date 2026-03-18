@@ -332,7 +332,7 @@ def generate_paper(
 \geometry{{margin=0.85in}}
 
 \title{{Experimental Draft: Agent-Driven Medical Imaging Research on {escape_latex(dataset_name)}}}
-\author{{autoresearch-medvision}}
+\author{{autoresearch-medimage}}
 \date{{{date_str}}}
 
 \begin{{document}}
@@ -340,7 +340,7 @@ def generate_paper(
 
 \begin{{abstract}}
 This draft was generated from local experiment artifacts produced by the
-autoresearch-medvision repository. It is intended as a scaffold for a paper,
+autoresearch-medimage repository. It is intended as a scaffold for a paper,
 not as a submission-ready manuscript. {summary_sentence}
 \end{{abstract}}
 

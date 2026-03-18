@@ -128,10 +128,10 @@ def plot_benchmark_comparison(best_row, published_rows, output_path, final_eval=
         values.append(value)
 
     if final_eval:
-        methods.append("autoresearch-medvision (held-out test)")
+        methods.append("autoresearch-medimage (held-out test)")
         values.append(float(final_eval.get("primary_metric", best_row.get("metric", 0.0))))
     else:
-        methods.append("autoresearch-medvision")
+        methods.append("autoresearch-medimage")
         values.append(float(best_row.get("metric", 0.0)))
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
@@ -176,7 +176,7 @@ def plot_per_pathology_comparison(checkpoint_results, per_pathology_rows, output
     fig, ax = plt.subplots(figsize=(11, 7.5))
     ax.barh(y - h, wang, height=h, color="#d0d0d0", label="Wang et al.")
     ax.barh(y, chexnet, height=h, color="#7fb3d5", label="CheXNet")
-    ax.barh(y + h, ours, height=h, color="#2ecc71", label="autoresearch-medvision")
+    ax.barh(y + h, ours, height=h, color="#2ecc71", label="autoresearch-medimage")
     ax.set_yticks(y)
     ax.set_yticklabels(classes)
     ax.set_xlabel("AUC (%)")

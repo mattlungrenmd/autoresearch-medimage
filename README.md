@@ -1,4 +1,4 @@
-# autoresearch-medvision
+# autoresearch-medimage
 
 Autoresearch-style candidate discovery for 2D medical imaging.
 

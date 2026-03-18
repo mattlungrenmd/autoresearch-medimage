@@ -1,5 +1,5 @@
 """
-Data preparation and evaluation for autoresearch-medvision experiments.
+Data preparation and evaluation for autoresearch-medimage experiments.
 
 This module has two public roles:
 1. download and prepare built-in benchmark datasets from Kaggle

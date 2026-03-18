@@ -1,4 +1,4 @@
-# autoresearch-medvision program
+# autoresearch-medimage program
 
 This repo follows a Karpathy-style autonomous research loop for medical
 imaging.
