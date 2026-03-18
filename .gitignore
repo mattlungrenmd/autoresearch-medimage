@@ -18,8 +18,10 @@ data/*
 run.log
 results.tsv
 checkpoints/
+logs/
 *.pth
 *.pt
+progress.png
 
 # Kaggle credentials (NEVER commit)
 kaggle.json

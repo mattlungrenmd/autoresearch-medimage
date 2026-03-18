@@ -1,25 +1,43 @@
 # autoresearch-medimage
 
-You have medical images. This repo runs an autoresearch loop to find the best
-model and hyperparameters for your task.
+`autoresearch-medimage` is a medical-imaging adaptation of
+[Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch).
 
-An AI agent runs fast, fixed-budget experiments, compares backbones,
-hyperparameters, and augmentation strategies, keeps a small frontier of strong
-candidates, and keeps mutating that frontier until it stalls.
+It is built for researchers with labeled 2D medical imaging datasets who want
+an agent-first loop for candidate discovery: backbones, losses, augmentations,
+and training settings under a fixed experiment contract.
 
-```
-1. Search   - agent runs fixed-budget medical-imaging experiments (5 min each)
-2. Evaluate - best kept checkpoint gets a held-out test eval and progress plot
-3. Scale    - winning configuration trains to convergence; paper helpers are optional
-```
+The repo is strongest today for:
+
+- candidate discovery on labeled medical imaging datasets
+- reproducible fixed-budget search runs on local GPU or Colab
+- staged validation after search, using held-out `test` only at the end
+
+It is not positioned as a turnkey final-model selector. Treat the search loop
+as a way to surface strong candidates quickly, then validate the finalists
+carefully.
+
+## Current Scope
+
+Public v1 supports:
+
+- 2D classification
+- 2D multilabel classification
+- binary segmentation
+
+Representative use cases:
+
+- chest X-ray multi-label classification
+- fundus or OCT classification
+- binary mask segmentation
 
 ## Quick Start: Your Dataset
 
 ```bash
-# Auto-detect task type, classes, and splits from any image directory
+# Auto-detect task type, classes, and splits from a local image folder
 uv run prepare.py --data /path/to/your/images
 
-# Run a search experiment
+# Run a fixed-budget search experiment
 uv run train.py --dataset your_dataset
 ```
 
@@ -29,9 +47,9 @@ Or use the manual contract:
 2. Run `uv run prepare.py --dataset your_dataset`
 3. Run `uv run train.py --dataset your_dataset`
 
-See [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md) for details.
+See [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md) for the schema.
 
-## Quick Start: Built-in Demo (CheXNet)
+## Quick Start: Built-In Demo (CheXNet)
 
 ```bash
 uv run prepare.py --dataset chestxray14
@@ -39,33 +57,28 @@ uv run train.py --recipe chexnet --save-checkpoint
 uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
 ```
 
-For a pure autoresearch flow, stop at the progress plot plus held-out eval of
-the winning checkpoint. `tools/finalize_run.py` and the paper/regulatory
-generators remain optional experimental helpers. See
-[docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the full walkthrough.
+See [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the
+end-to-end walkthrough and the benchmark context against the original CheXNet
+paper tables.
 
 ## Google Colab
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+You can use the public notebooks on a free T4 GPU with no local install.
 
-Try the public Colab paths on a free T4 GPU:
+- Quick start:
+  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+- CheXNet hello-world:
+  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_chexnet.ipynb)
+- Multi-run ChestXray14 search:
+  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb)
 
-- [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb) for the
-  smoke test and bring-your-own-data flow
-- [notebooks/colab_chexnet.ipynb](notebooks/colab_chexnet.ipynb) for the
-  ChestX-ray14 single-baseline `chexnet` demo using a local folder or archive
-  you already have
-- [notebooks/colab_autoresearch.ipynb](notebooks/colab_autoresearch.ipynb) for
-  a named ChestX-ray14 autoresearch session that seeds a baseline queue, keeps
-  a frontier of the best kept runs across multiple backbones, mutates that
-  frontier with fixed 300-second experiments, and finishes with a held-out
-  eval plus core artifact backup
+Notebook files in the repo:
 
-All three notebooks pull a public repo snapshot into `/content`. No local
-setup, GitHub token, or private-repo access is required once the repo is
-public.
+- [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb)
+- [notebooks/colab_chexnet.ipynb](notebooks/colab_chexnet.ipynb)
+- [notebooks/colab_autoresearch.ipynb](notebooks/colab_autoresearch.ipynb)
 
-## Smoke Test (no GPU, no download)
+## Smoke Test
 
 ```bash
 uv run prepare.py --dataset toy_binary
@@ -73,6 +86,9 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 ```
 
 ## Built-In Datasets
+
+These are built-in presets in `prepare.py`, so you can run them without
+creating your own `data/<dataset>/dataset.yaml` first.
 
 | Dataset | Task | Metric | Source |
 |---------|------|--------|--------|
@@ -85,35 +101,47 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 | `pneumothorax` | Segmentation | Dice | SIIM-ACR |
 
 ```bash
-uv run prepare.py --list          # list all datasets
-uv run train.py --list-recipes    # list all recipes
+uv run prepare.py --list
+uv run train.py --list-recipes
 ```
 
-## The Three Files
+## Repo Layout
 
+- `prepare.py`: dataset preparation, loaders, and evaluation
+- `train.py`: the experiment surface for the inner loop
+- `program.md`: agent instructions for the search loop
+- `data/`: built-in demos plus custom local datasets
+- `recipes/`: reproducible recipe files and baselines
+- `benchmarks/`: benchmark tables, including CheXNet paper comparisons
+- `docs/`: bring-your-own-data, GPU setup, and walkthrough docs
+- `notebooks/`: Colab entry points
+- `tools/`: progress plots, finalize helpers, and search utilities
+
+## Core Contract
+
+The Karpathy-style inner loop stays small:
+
+```text
+prepare.py  - fixed during search
+train.py    - experiment surface
+program.md  - agent instructions
 ```
-prepare.py  - dataset download, data loading, evaluation (READ-ONLY during search)
-train.py    - the experiment surface (agent modifies this)
-program.md  - agent instructions for the search loop
-```
 
-The agent modifies only `train.py` during the search phase. Once search
-converges, the core loop is: inspect `results.tsv`, refresh `progress.png`,
-and evaluate the best kept checkpoint on held-out `test`. The paper and
-regulatory generators are optional experimental helpers, not the core
-autoresearch contract.
+Search-time selection should happen on `val`. Use held-out `test` only for the
+final report of the winning checkpoint or finalists.
 
-See [program.md](program.md) for the full agent workflow.
+See [program.md](program.md) for the full agent workflow and
+[docs/OVERNIGHT_CHEXNET_RUN.md](docs/OVERNIGHT_CHEXNET_RUN.md) for the
+CheXNet-style overnight runbook.
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan.
+See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Acknowledgments
 
-Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) -
-the idea that a small, fixed contract (`prepare.py` + `train.py` + `program.md`)
-is enough for an AI agent to run an autonomous research loop.
+Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch):
+the idea that a small, fixed contract can support an autonomous research loop.
 
 ## License
 

@@ -14,6 +14,25 @@ the end-to-end demo that proves the repo can:
 
 That makes it the right example to reference when promoting the repo publicly.
 
+## Benchmark Context
+
+If you want the original paper comparison table, see
+[benchmarks/chestxray14.md](../benchmarks/chestxray14.md).
+
+That file includes:
+
+- the published mean-AUC table
+- the per-pathology CheXNet-vs-Wang breakdown
+- the place where you can record your own repo results
+
+If you generate figures from your run artifacts, the most relevant outputs are:
+
+- `paper/generated/chestxray14_figures/benchmark_comparison.png`
+- `paper/generated/chestxray14_figures/per_class_comparison.png`
+
+The right public story here is a throwback and a worked example, not a claim
+that one repo run replaces the original CheXNet paper.
+
 For Colab specifically:
 
 - use `notebooks/colab_chexnet.ipynb` for this single-baseline hello-world
