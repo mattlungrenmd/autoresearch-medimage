@@ -2,17 +2,14 @@
 
 CheXNet is the repo's canonical hello-world example.
 
-It is not the product center and it is not the only intended use case. It is
-the end-to-end demo that proves the repo can:
+It is an end-to-end demo that shows the repo can:
 
-- prepare a real public medical imaging dataset
+- prepare a real medical imaging dataset
 - run a fixed-budget autoresearch-style experiment
 - log results to `results.tsv`
 - save a checkpoint
 - separate inner-loop model selection from final held-out reporting
 - generate a draft paper from run results
-
-That makes it the right example to reference when promoting the repo publicly.
 
 ## Benchmark Context
 
@@ -29,9 +26,6 @@ If you generate figures from your run artifacts, the most relevant outputs are:
 
 - `paper/generated/chestxray14_figures/benchmark_comparison.png`
 - `paper/generated/chestxray14_figures/per_class_comparison.png`
-
-The right public story here is a throwback and a worked example, not a claim
-that one repo run replaces the original CheXNet paper.
 
 For Colab specifically:
 
@@ -98,13 +92,3 @@ Generate the progress plot for the overnight or multi-experiment run:
 ```bash
 uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
 ```
-
-## What To Show Publicly
-
-When promoting the repo, the strongest story is:
-
-1. start from a real benchmark dataset
-2. run a reproducible 300-second baseline selected on `val`
-3. finalize the run and report the untouched `test` result
-4. show the experiment ledger entry, checkpoint, and generated figures
-5. explain that users can then swap in their own dataset and objective
