@@ -1,5 +1,5 @@
 """
-Data preparation and evaluation for autoresearch-medvision experiments.
+Data preparation and evaluation for autoresearch-medimage experiments.
 Automates Kaggle dataset download for ophthalmology and radiology tasks.
 
 This file is READ-ONLY for agents. Do not modify.

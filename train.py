@@ -491,6 +491,9 @@ def main():
     # Setup
     t_start = time.time()
     torch.manual_seed(42)
+    if not torch.cuda.is_available():
+        print("ERROR: CUDA GPU required. See GPU_SETUP.md for free GPU options (Colab, Kaggle).")
+        sys.exit(1)
     torch.cuda.manual_seed(42)
     torch.set_float32_matmul_precision("high")
     device = torch.device("cuda")

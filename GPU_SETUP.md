@@ -7,8 +7,8 @@
 - **Setup**:
 ```python
 # In a Colab notebook:
-!git clone https://github.com/<your-username>/autoresearch-medvision
-%cd autoresearch-medvision
+!git clone https://github.com/mlungrengmail/autoresearch-medimage
+%cd autoresearch-medimage
 !pip install -e .
 !python prepare.py --dataset chest_xray
 !python train.py --recipe chest_xray_pneumonia --save-checkpoint
@@ -20,8 +20,8 @@
 - **Setup**:
 ```python
 # Kaggle notebook — datasets auto-available
-!git clone https://github.com/<your-username>/autoresearch-medvision
-%cd autoresearch-medvision
+!git clone https://github.com/mlungrengmail/autoresearch-medimage
+%cd autoresearch-medimage
 !pip install -e .
 # Kaggle datasets are pre-mounted at /kaggle/input/
 !python train.py --recipe chexnet --save-checkpoint

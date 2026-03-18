@@ -1,4 +1,4 @@
-# CLAUDE.md — Agent Instructions for autoresearch-medvision
+# CLAUDE.md — Agent Instructions for autoresearch-medimage
 
 ## Project Overview
 Autonomous medical imaging AI research framework. Iteratively experiments with architectures, optimizers, losses, and augmentations — running fixed 5-minute experiments and keeping only improvements.

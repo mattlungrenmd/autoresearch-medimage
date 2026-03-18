@@ -39,7 +39,7 @@
 | Pleural Thickening | 80.62 | 68.4 |
 | Hernia | 91.64 | 87.2 |
 
-## autoresearch-medvision Results
+## autoresearch-medimage Results
 
 *Run `uv run train.py --recipe chexnet --save-checkpoint` to add your results here.*
 

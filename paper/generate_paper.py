@@ -153,8 +153,8 @@ def generate_paper(results_df, config, template="full"):
 \title{{Automated Architecture Search for Medical Image {task.title()}:\\
 Results on {escape_latex(dataset_name)}}}
 
-\author{{autoresearch-medvision\\
-\texttt{{https://github.com/YOUR\_USERNAME/autoresearch-medvision}}}}
+\author{{autoresearch-medimage\\
+\texttt{{https://github.com/mlungrengmail/autoresearch-medimage}}}}
 
 \date{{{date_str}}}
 
@@ -165,7 +165,7 @@ Results on {escape_latex(dataset_name)}}}
 \begin{{abstract}}
 We present results from an automated architecture and hyperparameter search
 for medical image {task} on the {escape_latex(dataset_name)} dataset.
-Using the autoresearch-medvision framework, an autonomous agent iteratively
+Using the autoresearch-medimage framework, an autonomous agent iteratively
 explored model architectures (including DenseNet, EfficientNet, ConvNeXt,
 and Vision Transformers), optimizers, loss functions, and augmentation
 strategies through fixed 5-minute training experiments. Our best
@@ -256,13 +256,13 @@ Ours (best) & {best_metric} & {year} \\
 
 We demonstrated that autonomous architecture search can produce
 competitive medical imaging models with minimal human intervention.
-The autoresearch-medvision framework enables researchers to explore
+The autoresearch-medimage framework enables researchers to explore
 the design space systematically and reproducibly.
 
 \section*{{Reproducibility}}
 
 All code, configurations, and experiment logs are available at:
-\url{{https://github.com/YOUR\_USERNAME/autoresearch-medvision}}.
+\url{{https://github.com/mlungrengmail/autoresearch-medimage}}.
 Experiments can be reproduced with:
 \begin{{verbatim}}
 uv run prepare.py --dataset {dataset_name}

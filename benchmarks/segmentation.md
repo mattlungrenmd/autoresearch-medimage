@@ -34,7 +34,7 @@
 | Arterys (Cardiac) | Heart chambers | 92%+ | FDA 510(k) |
 | Brainomix (Stroke) | Brain ischemia | 90%+ | CE Mark, FDA |
 
-## autoresearch-medvision Results
+## autoresearch-medimage Results
 
 | Dataset | Commit | Dice | IoU | Backbone | Notes |
 |---------|--------|------|-----|----------|-------|

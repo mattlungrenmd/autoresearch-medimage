@@ -1,4 +1,4 @@
-# autoresearch-medvision
+# autoresearch-medimage
 
 **Autonomous AI research for medical image classification and segmentation.** An AI agent iteratively experiments with architectures, optimizers, losses, and augmentations — running fixed 5-minute experiments overnight and keeping only improvements.
 
@@ -138,12 +138,11 @@ The agent (see `program.md`):
 
 ## Roadmap
 
-- [ ] Auto-detect task from any Kaggle competition URL
-- [ ] Paper tracker — auto-pull new medical imaging papers + datasets
-- [ ] Automated arXiv submission pipeline for results
-- [ ] FDA/CE/UKCA regulatory documentation generator
+- [x] Auto-detect task from any Kaggle competition URL (`tools/kaggle_autodetect.py`)
+- [x] Paper tracker — auto-pull new medical imaging papers + datasets (`tools/paper_tracker.py`)
+- [x] FDA/CE/UKCA regulatory documentation generator (`regulatory/generate_regulatory.py`)
+- [x] Automated arXiv paper generation (`paper/generate_paper.py`)
 - [ ] HuggingFace model zoo upload
-- [ ] MedMNIST integration (18 standardized benchmarks)
 - [ ] Multi-GPU / distributed training support
 - [ ] ONNX export for edge deployment
 

@@ -1,4 +1,4 @@
-# autoresearch-medvision
+# autoresearch-medimage
 
 Autonomous AI research for medical image classification and segmentation, focused on ophthalmology and radiology. The default task reproduces CheXNet (Rajpurkar et al., 2017).
 

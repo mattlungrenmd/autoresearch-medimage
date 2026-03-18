@@ -20,7 +20,7 @@
 
 *Pooled meta-analysis across 82 DR screening studies: Sensitivity 93%, Specificity 90%*
 
-## autoresearch-medvision Results
+## autoresearch-medimage Results
 
 *Run `uv run train.py --recipe aptos_winner --save-checkpoint` to add your results here.*
 
