@@ -1,11 +1,10 @@
 """
-Finalize an autoresearch search session.
+Finalize an autoresearch run by regenerating the main artifacts.
 
-Prints the winning configuration (backbone, optimizer, LR, augmentations,
-etc.) so it can be used for a full-scale training run, then regenerates:
+This is intended for the end of an overnight session:
 - progress chart
-- held-out test evaluation (if test split exists)
-- manuscript figures and paper
+- paper scaffold
+- regulatory scaffolds
 """
 
 import argparse
@@ -87,9 +86,7 @@ def best_row(df):
 
 
 def run_command(command, workdir):
-    env = os.environ.copy()
-    env["MPLBACKEND"] = "Agg"
-    result = subprocess.run(command, cwd=workdir, capture_output=True, text=True, env=env)
+    result = subprocess.run(command, cwd=workdir, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed: {' '.join(command)}\n\nSTDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
@@ -104,6 +101,9 @@ def main():
     parser.add_argument("--session", type=str, default=None, help="Optional session filter")
     parser.add_argument("--progress-output", type=str, default=None, help="Optional progress PNG path")
     parser.add_argument("--paper-output", type=str, default=None, help="Optional paper .tex output path")
+    parser.add_argument("--final-eval-output", type=str, default=None, help="Optional held-out evaluation payload path")
+    parser.add_argument("--figures-output-dir", type=str, default=None, help="Optional figures output directory")
+    parser.add_argument("--reg-output-dir", type=str, default=None, help="Optional regulatory output directory")
     parser.add_argument("--compile-paper", action="store_true", help="Attempt LaTeX compilation if pdflatex is available")
     args = parser.parse_args()
 
@@ -120,7 +120,16 @@ def main():
     paper_output = os.path.abspath(
         args.paper_output or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_overnight.tex")
     )
-    final_eval_output = os.path.abspath(os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_final_eval.pt"))
+    final_eval_output = os.path.abspath(
+        args.final_eval_output or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_final_eval.pt")
+    )
+    figures_dir = os.path.abspath(
+        args.figures_output_dir or os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_figures")
+    )
+    reg_output_dir = os.path.abspath(
+        args.reg_output_dir or os.path.join(REPO_DIR, "regulatory", "generated", f"{dataset_name}_overnight")
+    )
+
     python_exe = sys.executable
 
     run_command(
@@ -138,7 +147,6 @@ def main():
         REPO_DIR,
     )
 
-    figures_dir = os.path.abspath(os.path.join(REPO_DIR, "paper", "generated", f"{dataset_name}_figures"))
     if dataset_has_split(dataset_name, "test") and str(winner.get("checkpoint_path", "")).strip():
         run_command(
             [
@@ -190,91 +198,58 @@ def main():
         paper_cmd.append("--compile")
     run_command(paper_cmd, REPO_DIR)
 
-    # --- Winning configuration summary ---
-    # Try checkpoint config first, fall back to results.tsv columns
-    ckpt_config = {}
-    ckpt_path = str(winner.get("checkpoint_path", "")).strip()
-    if ckpt_path and ckpt_path.lower() != "nan" and os.path.exists(ckpt_path):
-        try:
-            import torch
-            payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-            ckpt_config = payload.get("config", {})
-        except Exception:
-            pass
+    run_command(
+        [
+            python_exe,
+            os.path.join(REPO_DIR, "regulatory", "generate_regulatory.py"),
+            "--results",
+            os.path.abspath(args.results),
+            "--dataset",
+            dataset_name,
+            "--output-dir",
+            reg_output_dir,
+            *(["--session", session_name] if session_name else []),
+        ],
+        REPO_DIR,
+    )
 
-    def _cfg(key, fallback_key=None):
-        val = ckpt_config.get(key, "")
-        if not val and fallback_key:
-            val = winner.get(fallback_key, "")
-        if not val:
-            val = winner.get(key, "")
-        if val is None or pd.isna(val):
-            return ""
-        text = str(val).strip()
-        if text and text.lower() != "nan":
-            return text
-        return ""
-
-    print("=" * 60)
-    print("WINNING CONFIGURATION")
-    print("=" * 60)
-    print(f"  dataset:       {dataset_name}")
+    search_summary = ""
     if session_name:
-        print(f"  session:       {session_name}")
-    print(f"  best metric:   {winner.get('metric_name', 'metric')} = {winner.get('metric', '')}")
-    if final_eval_output:
-        print(f"  held-out test: (see {os.path.basename(final_eval_output)})")
-    print()
-    backbone = _cfg("backbone")
-    if backbone:
-        print(f"  backbone:      {backbone}")
-    optimizer = _cfg("optimizer")
-    if optimizer:
-        print(f"  optimizer:     {optimizer}")
-    lr = _cfg("learning_rate")
-    if lr:
-        print(f"  learning_rate: {lr}")
-    wd = _cfg("weight_decay")
-    if wd:
-        print(f"  weight_decay:  {wd}")
-    bs = _cfg("batch_size")
-    if bs:
-        print(f"  batch_size:    {bs}")
-    loss = _cfg("loss")
-    if loss:
-        print(f"  loss:          {loss}")
-    dropout = _cfg("dropout")
-    if dropout:
-        print(f"  dropout:       {dropout}")
-    img_size = _cfg("image_size")
-    if img_size:
-        print(f"  image_size:    {img_size}")
-    augmentations = _cfg("augmentations")
-    if augmentations:
-        print(f"  augmentations: {augmentations}")
+        search_dir = os.path.join(REPO_DIR, "logs", session_name, "search")
+        state_file = os.path.join(search_dir, "search_state.json")
+        if os.path.exists(state_file):
+            search_summary = os.path.join(search_dir, "search_summary.md")
+            run_command(
+                [
+                    python_exe,
+                    os.path.join(REPO_DIR, "tools", "search_report.py"),
+                    "--session",
+                    session_name,
+                    "--results",
+                    os.path.abspath(args.results),
+                    "--search-dir",
+                    search_dir,
+                    "--output",
+                    search_summary,
+                ],
+                REPO_DIR,
+            )
 
-    # Advanced features
-    advanced = []
-    for feat in ["ema", "tta", "mixup", "cutmix", "swa", "llrd"]:
-        val = ckpt_config.get(feat)
-        if val:
-            advanced.append(feat.upper())
-    if advanced:
-        print(f"  advanced:      {', '.join(advanced)}")
-
-    print()
-    print(f"  checkpoint:    {ckpt_path}")
-    print()
-    print("To train this configuration to convergence:")
-    print(f"  uv run train.py --dataset {dataset_name} --time-budget <seconds> --save-checkpoint")
-    print()
-    print("-" * 60)
-    print("Generated artifacts:")
-    print(f"  progress:   {progress_output}")
+    print("Finalized run artifacts:")
+    print(f"  dataset: {dataset_name}")
+    if session_name:
+        print(f"  session: {session_name}")
+    print(f"  best metric: {winner.get('metric_name', 'metric')}={winner.get('metric', '')}")
+    print(f"  status basis: {'keep' if 'status' in selected.columns and (selected['status'] == 'keep').any() else 'candidate'}")
+    print(f"  checkpoint: {winner.get('checkpoint_path', '')}")
+    print(f"  progress: {progress_output}")
     if final_eval_output:
         print(f"  final eval: {final_eval_output}")
-    print(f"  figures:    {figures_dir}")
-    print(f"  paper:      {paper_output}")
+    print(f"  figures: {figures_dir}")
+    print(f"  paper: {paper_output}")
+    print(f"  regulatory: {reg_output_dir}")
+    if search_summary:
+        print(f"  search summary: {search_summary}")
 
 
 if __name__ == "__main__":
