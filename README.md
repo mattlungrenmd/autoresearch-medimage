@@ -116,6 +116,8 @@ there.
 
 See [GPU_SETUP.md](GPU_SETUP.md) for practical environment guidance and
 [docs/COLAB_OVERNIGHT_RUN.md](docs/COLAB_OVERNIGHT_RUN.md) for the Colab lane.
+If you prefer notebook cells, start from
+[notebooks/colab_chexnet_overnight.ipynb](notebooks/colab_chexnet_overnight.ipynb).
 For pre-push hygiene and smoke validation, see
 [docs/PUBLIC_RELEASE_CHECKLIST.md](docs/PUBLIC_RELEASE_CHECKLIST.md).
 

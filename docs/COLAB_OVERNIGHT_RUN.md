@@ -3,6 +3,11 @@
 This runbook sets up a separate CheXNet overnight lane on Google Colab without
 mixing it into an existing local session.
 
+If you prefer notebook cells instead of copying commands manually, the repo
+also includes
+[`notebooks/colab_chexnet_overnight.ipynb`](../notebooks/colab_chexnet_overnight.ipynb)
+as a maintained bootstrap notebook for the same flow.
+
 ## Goal
 
 Run a second agent-driven search on `chestxray14` in Colab with:
