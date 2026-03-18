@@ -182,8 +182,11 @@ Recipes are examples and baselines, not the whole product story.
 
 - `chexnet` for the hello-world end-to-end demo
 - ophthalmology examples such as `aptos_winner`
-- foundation-model examples such as `chexnet_biomedclip`
 - generic starter templates for classification, multilabel, and segmentation
+
+Optional medical foundation-model recipes such as `chexnet_biomedclip` and
+`chexnet_raddino` are documented in
+[FOUNDATION_MODELS.md](FOUNDATION_MODELS.md).
 
 ## Agent Workflow
 
@@ -352,23 +355,6 @@ These longer runs are meant to re-rank and validate promising candidates under
 a different budget. They are intentionally separate from the short screening
 loop, because the best short-budget recipe is not guaranteed to remain the best
 after longer training.
-
-## Experimental Outputs
-
-These tools exist, but they are not the main claim of the repo:
-
-- `uv run paper/generate_paper.py`
-- `uv run regulatory/generate_regulatory.py`
-
-Both are experimental scaffolds built from run artifacts. They are not
-submission-ready outputs.
-
-To visualize an overnight run ledger, you can also generate a Karpathy-style
-progress chart:
-
-```bash
-uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
-```
 
 ## Roadmap
 
