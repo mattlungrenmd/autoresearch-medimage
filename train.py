@@ -1,5 +1,5 @@
-"""
-autoresearch-medimage training script.
+﻿"""
+Autoresearch-MedVision training script.
 
 This is the experiment surface for the Karpathy-style inner loop:
 - fixed time budget
@@ -10,21 +10,22 @@ This is the experiment surface for the Karpathy-style inner loop:
 Usage:
     uv run train.py                                    # CheXNet on ChestX-ray14 (default)
     uv run train.py --recipe chexnet                   # Load recipe config
+    uv run train.py --recipe-file logs/run/cand.yaml   # Load a session-local overlay recipe
     uv run train.py --recipe aptos_winner              # Kaggle-winning DR approach
     uv run train.py --dataset aptos                    # DR grading (manual config)
     uv run train.py --dataset brain_mri                # Brain tumor segmentation
+    uv run train.py --recipe chexnet --epochs 10       # Optional full-train mode
     uv run train.py --save-checkpoint                  # Save best model
 """
 
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
-import copy
+import random
 import csv
 import gc
+import json
 import math
-import random
-import sys
 import time
 import argparse
 from contextlib import nullcontext
@@ -57,15 +58,25 @@ from prepare import (
 # Recipe loader — load configs from recipes/*.yaml
 # ---------------------------------------------------------------------------
 
-def load_recipe(recipe_name):
+def load_recipe_file(recipe_path):
     """Load a recipe YAML file and return config dict."""
     try:
         import yaml
-    except ImportError as exc:
-        raise SystemExit(
-            "PyYAML is required for recipe support. Run `uv sync` to install dependencies."
-        ) from exc
+    except ImportError:
+        yaml = None
 
+    if not recipe_path.exists():
+        raise FileNotFoundError(f"Recipe file not found: {recipe_path}")
+
+    if yaml is not None:
+        with open(recipe_path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    else:
+        raise RuntimeError("PyYAML is required for recipe loading. Run: uv sync")
+
+
+def load_recipe(recipe_name):
+    """Load a recipe YAML file from recipes/ and return config dict."""
     recipe_dir = Path(__file__).parent / "recipes"
     recipe_path = recipe_dir / f"{recipe_name}.yaml"
 
@@ -75,13 +86,7 @@ def load_recipe(recipe_name):
         print(f"Available recipes: {', '.join(sorted(available))}")
         exit(1)
 
-    with open(recipe_path, encoding="utf-8") as f:
-        recipe = yaml.safe_load(f)
-
-    if not isinstance(recipe, dict):
-        raise SystemExit(f"Recipe '{recipe_name}' is invalid: expected a YAML mapping.")
-
-    return recipe
+    return load_recipe_file(recipe_path)
 
 
 def apply_recipe(recipe):
@@ -93,16 +98,17 @@ def apply_recipe(recipe):
     global AUG_HORIZONTAL_FLIP, AUG_VERTICAL_FLIP, AUG_ROTATION_DEGREES
     global AUG_COLOR_JITTER, AUG_COLOR_JITTER_BRIGHTNESS, AUG_COLOR_JITTER_CONTRAST
     global AUG_USE_CLAHE
-    global GRAD_ACCUM_STEPS, USE_EMA, EMA_DECAY, USE_MIXUP, MIXUP_ALPHA
-    global USE_GRADUAL_UNFREEZE, UNFREEZE_AFTER_RATIO, DISCRIMINATIVE_LR, BACKBONE_LR_FACTOR
-    global GRAD_CLIP_NORM, COMPUTE_CI, CI_BOOTSTRAPS
-    global ELASTIC_TRANSFORM, GRID_DISTORTION, COARSE_DROPOUT, COARSE_DROPOUT_RATIO
+    global GRAD_ACCUM_STEPS, USE_EMA, EMA_DECAY, USE_TTA, USE_COMPILE
+    global USE_MIXUP, MIXUP_ALPHA, USE_GRADUAL_UNFREEZE, UNFREEZE_AFTER_RATIO
+    global DISCRIMINATIVE_LR, BACKBONE_LR_FACTOR, GRAD_CLIP_NORM
+    global COMPUTE_CI, CI_BOOTSTRAPS
     global USE_CUTMIX, CUTMIX_ALPHA, LR_SCHEDULE, USE_SWA, SWA_START_RATIO
-    global TVERSKY_ALPHA, TVERSKY_BETA, OPTIMIZE_THRESHOLDS
-    global SEG_BACKBONE, SEG_USE_ATTENTION, USE_LLRD, LLRD_DECAY
-    global GENERATE_GRADCAM, GRADCAM_NUM_SAMPLES, EXPORT_ONNX
+    global OPTIMIZE_THRESHOLDS
+    global TVERSKY_ALPHA, TVERSKY_BETA
+    global SEG_BACKBONE, SEG_USE_ATTENTION
+    global USE_LLRD, LLRD_DECAY
     global USE_DISTILLATION, TEACHER_CHECKPOINT, DISTILL_ALPHA, DISTILL_TEMPERATURE
-    global USE_MODEL_SOUP, SOUP_CHECKPOINTS
+    global ELASTIC_TRANSFORM, GRID_DISTORTION, COARSE_DROPOUT, COARSE_DROPOUT_RATIO
 
     if "dataset" in recipe:
         DATASET = recipe["dataset"]
@@ -117,9 +123,7 @@ def apply_recipe(recipe):
 
     training = recipe.get("training", {})
     if isinstance(training, dict):
-        if "batch_size" in training:
-            BATCH_SIZE = training["batch_size"]
-            SEG_BATCH_SIZE = training["batch_size"]
+        BATCH_SIZE = training.get("batch_size", BATCH_SIZE)
         LEARNING_RATE = training.get("learning_rate", LEARNING_RATE)
         OPTIMIZER = training.get("optimizer", OPTIMIZER)
         WEIGHT_DECAY = training.get("weight_decay", WEIGHT_DECAY)
@@ -147,12 +151,16 @@ def apply_recipe(recipe):
         )
         AUG_USE_CLAHE = augmentation.get("clahe", AUG_USE_CLAHE)
 
-    # Advanced training options
+    IMAGE_SIZE_OVERRIDE = recipe.get("image_size", None)
+
+    # Advanced training settings
     advanced = recipe.get("advanced", {})
     if isinstance(advanced, dict):
         GRAD_ACCUM_STEPS = advanced.get("grad_accum_steps", GRAD_ACCUM_STEPS)
         USE_EMA = advanced.get("ema", USE_EMA)
         EMA_DECAY = advanced.get("ema_decay", EMA_DECAY)
+        USE_TTA = advanced.get("tta", USE_TTA)
+        USE_COMPILE = advanced.get("compile", USE_COMPILE)
         USE_MIXUP = advanced.get("mixup", USE_MIXUP)
         MIXUP_ALPHA = advanced.get("mixup_alpha", MIXUP_ALPHA)
         USE_GRADUAL_UNFREEZE = advanced.get("gradual_unfreeze", USE_GRADUAL_UNFREEZE)
@@ -170,29 +178,22 @@ def apply_recipe(recipe):
         OPTIMIZE_THRESHOLDS = advanced.get("optimize_thresholds", OPTIMIZE_THRESHOLDS)
         USE_LLRD = advanced.get("llrd", USE_LLRD)
         LLRD_DECAY = advanced.get("llrd_decay", LLRD_DECAY)
-        GENERATE_GRADCAM = advanced.get("gradcam", GENERATE_GRADCAM)
-        GRADCAM_NUM_SAMPLES = advanced.get("gradcam_samples", GRADCAM_NUM_SAMPLES)
-        EXPORT_ONNX = advanced.get("export_onnx", EXPORT_ONNX)
         USE_DISTILLATION = advanced.get("distillation", USE_DISTILLATION)
         TEACHER_CHECKPOINT = advanced.get("teacher_checkpoint", TEACHER_CHECKPOINT)
         DISTILL_ALPHA = advanced.get("distill_alpha", DISTILL_ALPHA)
         DISTILL_TEMPERATURE = advanced.get("distill_temperature", DISTILL_TEMPERATURE)
-        USE_MODEL_SOUP = advanced.get("model_soup", USE_MODEL_SOUP)
-        SOUP_CHECKPOINTS = advanced.get("soup_checkpoints", SOUP_CHECKPOINTS)
 
-    IMAGE_SIZE_OVERRIDE = recipe.get("image_size", None)
-
-    # Loss extras (Tversky)
+    # Tversky loss parameters from loss section
     if isinstance(loss, dict):
         TVERSKY_ALPHA = loss.get("tversky_alpha", TVERSKY_ALPHA)
         TVERSKY_BETA = loss.get("tversky_beta", TVERSKY_BETA)
 
-    # Model extras (segmentation backbone, attention)
+    # Model section: segmentation backbone and attention
     if isinstance(model, dict):
         SEG_BACKBONE = model.get("seg_backbone", SEG_BACKBONE)
         SEG_USE_ATTENTION = model.get("seg_attention", SEG_USE_ATTENTION)
 
-    # Albumentations augmentation
+    # Augmentation: albumentations extras
     if isinstance(augmentation, dict):
         ELASTIC_TRANSFORM = augmentation.get("elastic_transform", ELASTIC_TRANSFORM)
         GRID_DISTORTION = augmentation.get("grid_distortion", GRID_DISTORTION)
@@ -255,6 +256,8 @@ AUG_USE_CLAHE = False
 GRAD_ACCUM_STEPS = 1          # gradient accumulation steps
 USE_EMA = False               # exponential moving average of model weights
 EMA_DECAY = 0.999             # EMA decay rate
+USE_TTA = False               # test-time augmentation (horizontal flip)
+USE_COMPILE = True            # torch.compile on supported CUDA platforms
 USE_MIXUP = False             # MixUp regularization
 MIXUP_ALPHA = 0.2             # MixUp interpolation strength
 USE_GRADUAL_UNFREEZE = False  # freeze backbone initially, then unfreeze
@@ -293,15 +296,6 @@ TEACHER_CHECKPOINT = ""       # path to teacher model checkpoint
 DISTILL_ALPHA = 0.5           # weight for distillation loss vs task loss
 DISTILL_TEMPERATURE = 3.0     # softmax temperature for distillation
 
-# Grad-CAM and ONNX export
-GENERATE_GRADCAM = False      # generate Grad-CAM heatmaps after eval
-GRADCAM_NUM_SAMPLES = 10      # number of samples for Grad-CAM
-EXPORT_ONNX = False           # export model to ONNX after eval
-
-# Model soup
-USE_MODEL_SOUP = False        # model soups (weight averaging of checkpoints)
-SOUP_CHECKPOINTS = []         # list of checkpoint paths for model soup
-
 # Checkpointing
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
 RESULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results.tsv")
@@ -322,18 +316,31 @@ RESULTS_HEADER = [
     "augmentations",
     "seed",
     "time_budget_seconds",
+    "budget_mode",
+    "epoch_budget",
     "metric_name",
     "metric",
     "memory_gb",
     "status",
     "checkpoint_path",
     "description",
+    "candidate_id",
+    "parent_id",
+    "search_algo",
+    "mutation_op",
+    "base_recipe",
+    "replicate_group",
+    "failure_reason",
 ]
 RUN_TIME_BUDGET = TIME_BUDGET
+RUN_BUDGET_MODE = "time"
+RUN_EPOCH_BUDGET = None
 CURRENT_RUN_DATASET = DATASET
 CURRENT_RUN_RECIPE = ""
 CURRENT_RUN_BACKBONE = BACKBONE
 CURRENT_RUN_SESSION = ""
+CURRENT_RUN_METADATA = {}
+CURRENT_RUN_RECIPE_SOURCE = ""
 RUN_SEED = 42
 
 
@@ -364,23 +371,48 @@ def summarize_augmentations():
         flags.append("color")
     if AUG_USE_CLAHE:
         flags.append("clahe")
+    if ELASTIC_TRANSFORM:
+        flags.append("elastic")
+    if GRID_DISTORTION:
+        flags.append("grid")
+    if COARSE_DROPOUT:
+        flags.append(f"coarse={COARSE_DROPOUT_RATIO:g}")
     return ",".join(flags) if flags else "none"
 
 
-def current_results_metadata(cfg, loss_type, task="classification"):
-    batch_size = SEG_BATCH_SIZE if task == "segmentation" else BATCH_SIZE
+def stringify_results_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
+
+
+def current_results_metadata(cfg, loss_type, batch_size=None):
+    search_metadata = {
+        "candidate_id": CURRENT_RUN_METADATA.get("candidate_id", ""),
+        "parent_id": CURRENT_RUN_METADATA.get("parent_id", ""),
+        "search_algo": CURRENT_RUN_METADATA.get("search_algo", ""),
+        "mutation_op": CURRENT_RUN_METADATA.get("mutation_op", ""),
+        "base_recipe": CURRENT_RUN_METADATA.get("base_recipe", ""),
+        "replicate_group": CURRENT_RUN_METADATA.get("replicate_group", ""),
+        "failure_reason": CURRENT_RUN_METADATA.get("failure_reason", ""),
+    }
     return {
         "session": CURRENT_RUN_SESSION or "",
         "optimizer": OPTIMIZER,
         "loss": loss_type,
         "image_size": str(get_image_size(cfg)),
-        "batch_size": str(batch_size),
+        "batch_size": str(batch_size if batch_size is not None else BATCH_SIZE),
         "learning_rate": f"{LEARNING_RATE:.8g}",
         "weight_decay": f"{WEIGHT_DECAY:.8g}",
         "dropout": f"{DROPOUT:.4f}",
         "augmentations": summarize_augmentations(),
         "seed": str(RUN_SEED),
-        "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}",
+        "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}" if RUN_BUDGET_MODE == "time" else "",
+        "budget_mode": RUN_BUDGET_MODE,
+        "epoch_budget": str(RUN_EPOCH_BUDGET or ""),
+        **{key: stringify_results_value(value) for key, value in search_metadata.items()},
     }
 
 # ---------------------------------------------------------------------------
@@ -732,367 +764,6 @@ class OrdinalRegressionLoss(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# EMA (Exponential Moving Average)
-# ---------------------------------------------------------------------------
-
-class ModelEMA:
-    """Maintains an exponential moving average of model parameters."""
-
-    def __init__(self, model, decay=0.999):
-        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-        self.ema_model = copy.deepcopy(raw)
-        self.ema_model.eval()
-        self.decay = decay
-        for p in self.ema_model.parameters():
-            p.requires_grad_(False)
-
-    @torch.no_grad()
-    def update(self, model):
-        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-        for ema_p, model_p in zip(self.ema_model.parameters(), raw.parameters()):
-            ema_p.data.mul_(self.decay).add_(model_p.data, alpha=1.0 - self.decay)
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap confidence intervals
-# ---------------------------------------------------------------------------
-
-def bootstrap_ci(metric_fn, preds, targets, n_bootstraps=1000, ci=0.95):
-    """Compute bootstrap confidence interval for a metric function.
-
-    Args:
-        metric_fn: callable(preds, targets) -> float
-        preds: numpy array of predictions
-        targets: numpy array of targets
-        n_bootstraps: number of bootstrap iterations
-        ci: confidence level (default 0.95)
-
-    Returns:
-        (mean, lower, upper) tuple
-    """
-    rng = np.random.RandomState(42)
-    n = len(preds)
-    scores = []
-    for _ in range(n_bootstraps):
-        idx = rng.randint(0, n, size=n)
-        try:
-            score = metric_fn(preds[idx], targets[idx])
-            if not np.isnan(score):
-                scores.append(score)
-        except (ValueError, IndexError):
-            continue
-    if not scores:
-        return 0.0, 0.0, 0.0
-    scores = np.array(scores)
-    mean = np.mean(scores)
-    alpha = 1 - ci
-    lower = np.percentile(scores, 100 * alpha / 2)
-    upper = np.percentile(scores, 100 * (1 - alpha / 2))
-    return mean, lower, upper
-
-
-# ---------------------------------------------------------------------------
-# MixUp
-# ---------------------------------------------------------------------------
-
-def mixup_data(images, targets, alpha=0.2):
-    """Apply MixUp augmentation. Returns mixed inputs and pair of targets with lambda."""
-    lam = torch.distributions.Beta(alpha, alpha).sample().item() if alpha > 0 else 1.0
-    batch_size = images.size(0)
-    index = torch.randperm(batch_size, device=images.device)
-    mixed_images = lam * images + (1 - lam) * images[index]
-    return mixed_images, targets, targets[index], lam
-
-
-def mixup_criterion(criterion, logits, targets_a, targets_b, lam):
-    """Compute MixUp loss as weighted combination."""
-    return lam * criterion(logits, targets_a) + (1 - lam) * criterion(logits, targets_b)
-
-
-# ---------------------------------------------------------------------------
-# CutMix
-# ---------------------------------------------------------------------------
-
-def cutmix_data(images, targets, alpha=1.0):
-    """Apply CutMix augmentation. Cuts a random patch from one image and pastes onto another."""
-    lam = torch.distributions.Beta(alpha, alpha).sample().item() if alpha > 0 else 1.0
-    batch_size = images.size(0)
-    index = torch.randperm(batch_size, device=images.device)
-
-    # Generate random bounding box
-    _, _, H, W = images.shape
-    cut_ratio = math.sqrt(1.0 - lam)
-    cut_h = int(H * cut_ratio)
-    cut_w = int(W * cut_ratio)
-
-    cy = torch.randint(0, H, (1,)).item()
-    cx = torch.randint(0, W, (1,)).item()
-
-    y1 = max(0, cy - cut_h // 2)
-    y2 = min(H, cy + cut_h // 2)
-    x1 = max(0, cx - cut_w // 2)
-    x2 = min(W, cx + cut_w // 2)
-
-    mixed_images = images.clone()
-    mixed_images[:, :, y1:y2, x1:x2] = images[index, :, y1:y2, x1:x2]
-
-    # Adjust lambda to exactly match the pixel ratio
-    lam = 1 - (y2 - y1) * (x2 - x1) / (H * W)
-
-    return mixed_images, targets, targets[index], lam
-
-
-# ---------------------------------------------------------------------------
-# Per-class threshold optimization
-# ---------------------------------------------------------------------------
-
-def optimize_thresholds(probs, targets, num_classes):
-    """Find optimal sigmoid threshold per class for multilabel tasks.
-    Maximizes F1 score per class.
-    """
-    thresholds = np.full(num_classes, 0.5)
-    for i in range(num_classes):
-        best_f1 = 0.0
-        best_t = 0.5
-        for t in np.arange(0.1, 0.9, 0.02):
-            preds = (probs[:, i] >= t).astype(int)
-            try:
-                f1 = f1_score(targets[:, i], preds, zero_division=0)
-                if f1 > best_f1:
-                    best_f1 = f1
-                    best_t = t
-            except ValueError:
-                continue
-        thresholds[i] = best_t
-    return thresholds
-
-
-# ---------------------------------------------------------------------------
-# Test-Time Augmentation
-# ---------------------------------------------------------------------------
-
-@torch.no_grad()
-def tta_predict(model, images, device):
-    """Average predictions over original + horizontally flipped images."""
-    autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.float16)
-    with autocast_ctx:
-        logits1 = model(images.to(device))
-        logits2 = model(torch.flip(images.to(device), dims=[-1]))
-    return (logits1 + logits2) / 2.0
-
-
-# ---------------------------------------------------------------------------
-# LLRD -- Layer-wise Learning Rate Decay
-# ---------------------------------------------------------------------------
-
-def get_llrd_param_groups(model, base_lr, decay=0.9):
-    """Create per-layer parameter groups with exponentially decaying LR.
-    Deeper (earlier) layers get lower LR. Head gets base_lr.
-    """
-    raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-    if not hasattr(raw, "encoder"):
-        return [{"params": model.parameters(), "lr": base_lr}]
-
-    # Collect named parameters into layers
-    encoder_params = list(raw.encoder.named_parameters())
-    head_params = [p for n, p in raw.named_parameters()
-                   if not n.startswith("encoder")]
-
-    # Group encoder params by depth (heuristic: split by '.' depth)
-    layer_groups = {}
-    for name, param in encoder_params:
-        parts = name.split(".")
-        # Use first 2 parts as group key for depth
-        depth_key = ".".join(parts[:2]) if len(parts) > 1 else parts[0]
-        if depth_key not in layer_groups:
-            layer_groups[depth_key] = []
-        layer_groups[depth_key].append(param)
-
-    sorted_groups = list(layer_groups.values())
-    num_layers = len(sorted_groups)
-
-    param_groups = []
-    for i, group in enumerate(sorted_groups):
-        layer_lr = base_lr * (decay ** (num_layers - i))
-        param_groups.append({"params": group, "lr": layer_lr})
-
-    # Head at full LR
-    param_groups.append({"params": head_params, "lr": base_lr})
-
-    return param_groups
-
-
-# ---------------------------------------------------------------------------
-# Knowledge Distillation
-# ---------------------------------------------------------------------------
-
-def distillation_loss(student_logits, teacher_logits, targets, criterion,
-                      alpha=0.5, temperature=3.0):
-    """Combined task loss + KL divergence from teacher soft targets."""
-    task_loss = criterion(student_logits, targets)
-
-    # Soft targets from teacher
-    with torch.no_grad():
-        teacher_soft = F.softmax(teacher_logits / temperature, dim=-1)
-    student_log_soft = F.log_softmax(student_logits / temperature, dim=-1)
-
-    kd_loss = F.kl_div(student_log_soft, teacher_soft, reduction="batchmean") * (temperature ** 2)
-
-    return (1 - alpha) * task_loss + alpha * kd_loss
-
-
-# ---------------------------------------------------------------------------
-# Model Soup
-# ---------------------------------------------------------------------------
-
-def model_soup(checkpoint_paths, model):
-    """Average weights from multiple checkpoints (model soup).
-    Returns the model with averaged weights.
-    """
-    raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-    state_dicts = []
-
-    for path in checkpoint_paths:
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
-        state_dicts.append(ckpt["model_state_dict"])
-
-    if not state_dicts:
-        print("Model soup: no checkpoints found")
-        return model
-
-    # Average all state dicts
-    avg_state = {}
-    for key in state_dicts[0]:
-        avg_state[key] = sum(sd[key].float() for sd in state_dicts) / len(state_dicts)
-
-    raw.load_state_dict(avg_state)
-    print(f"Model soup: averaged {len(state_dicts)} checkpoints")
-    return model
-
-
-# ---------------------------------------------------------------------------
-# Grad-CAM
-# ---------------------------------------------------------------------------
-
-def generate_gradcam(model, dataloader, device, num_samples=10, save_dir=None):
-    """Generate Grad-CAM heatmaps for interpretability.
-    Works with classification models that have an encoder attribute.
-    """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    if save_dir is None:
-        save_dir = os.path.join(CHECKPOINT_DIR, "gradcam")
-    os.makedirs(save_dir, exist_ok=True)
-
-    raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model
-    if not hasattr(raw_model, "encoder"):
-        print("Grad-CAM: model has no encoder attribute, skipping")
-        return
-
-    raw_model.eval()
-    activations = {}
-    gradients = {}
-
-    # Hook into last conv layer
-    target_layer = None
-    for name, module in raw_model.encoder.named_modules():
-        if isinstance(module, (nn.Conv2d,)):
-            target_layer = module
-            target_name = name
-
-    if target_layer is None:
-        print("Grad-CAM: no conv layer found, skipping")
-        return
-
-    def fwd_hook(m, inp, out):
-        activations["value"] = out.detach()
-
-    def bwd_hook(m, grad_in, grad_out):
-        gradients["value"] = grad_out[0].detach()
-
-    h1 = target_layer.register_forward_hook(fwd_hook)
-    h2 = target_layer.register_full_backward_hook(bwd_hook)
-
-    count = 0
-    for images, targets in dataloader:
-        if count >= num_samples:
-            break
-        for i in range(min(images.size(0), num_samples - count)):
-            img = images[i:i+1].to(device).requires_grad_(True)
-
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=False):
-                logits = raw_model(img.float())
-
-            pred_class = logits.argmax(dim=1).item()
-            logits[0, pred_class].backward()
-
-            act = activations["value"][0]
-            grad = gradients["value"][0]
-            weights = grad.mean(dim=(1, 2), keepdim=True)
-            cam = (weights * act).sum(dim=0).clamp(min=0)
-            cam = cam / (cam.max() + 1e-8)
-            cam = F.interpolate(
-                cam.unsqueeze(0).unsqueeze(0),
-                size=images.shape[-2:],
-                mode="bilinear", align_corners=False,
-            )[0, 0].cpu().numpy()
-
-            # Save heatmap overlay
-            fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-            img_np = images[i].permute(1, 2, 0).numpy()
-            img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min() + 1e-8)
-            axes[0].imshow(img_np)
-            axes[0].set_title(f"Input (true={targets[i].item() if targets.dim() == 1 else 'multi'})")
-            axes[0].axis("off")
-            axes[1].imshow(img_np)
-            axes[1].imshow(cam, alpha=0.5, cmap="jet")
-            axes[1].set_title(f"Grad-CAM (pred={pred_class})")
-            axes[1].axis("off")
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_dir, f"gradcam_{count:03d}.png"), dpi=100)
-            plt.close()
-
-            raw_model.zero_grad()
-            count += 1
-
-    h1.remove()
-    h2.remove()
-    print(f"Grad-CAM: saved {count} heatmaps to {save_dir}")
-
-
-# ---------------------------------------------------------------------------
-# ONNX Export
-# ---------------------------------------------------------------------------
-
-def export_onnx(model, input_shape, save_path=None, dataset_name="model"):
-    """Export model to ONNX format with dynamic batch axis."""
-    if save_path is None:
-        save_path = os.path.join(CHECKPOINT_DIR, f"{dataset_name}.onnx")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model
-    raw_model.eval()
-    raw_model = raw_model.cpu()
-
-    dummy = torch.randn(1, *input_shape)
-    try:
-        torch.onnx.export(
-            raw_model, dummy, save_path,
-            input_names=["input"],
-            output_names=["output"],
-            dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
-            opset_version=17,
-        )
-        print(f"ONNX export: {save_path} ({os.path.getsize(save_path) / 1024 / 1024:.1f} MB)")
-    except Exception as e:
-        print(f"ONNX export failed: {e}")
-    finally:
-        raw_model.to("cuda")
-
-
-# ---------------------------------------------------------------------------
 # Runtime and data utilities
 # ---------------------------------------------------------------------------
 
@@ -1119,11 +790,17 @@ def autocast_context(device):
 def select_device():
     if torch.cuda.is_available():
         return torch.device("cuda")
-    print("WARNING: CUDA not available. Falling back to CPU for smoke-test style runs.")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        print("CUDA not available. Using Apple MPS backend.")
+        return torch.device("mps")
+    print("WARNING: No CUDA device found. Falling back to CPU.")
     return torch.device("cpu")
 
 
 def maybe_compile_model(model, device):
+    if not USE_COMPILE:
+        print("Compile: disabled by config.")
+        return model
     if not hasattr(torch, "compile"):
         print("Compile: unavailable on this torch build; running eager.")
         return model
@@ -1146,9 +823,19 @@ def get_image_size(cfg):
     return int(IMAGE_SIZE_OVERRIDE or cfg["image_size"])
 
 
-def resolve_worker_count():
+def recommended_windows_worker_count(base_workers, batch_size, image_size):
+    worker_count = max(0, min(int(base_workers), 2))
+    pixel_budget = max(1, int(batch_size)) * max(1, int(image_size)) * max(1, int(image_size))
+    if pixel_budget >= 2_000_000:
+        return 0
+    if pixel_budget >= 1_000_000:
+        return min(worker_count, 1)
+    return worker_count
+
+
+def resolve_worker_count(cfg, batch_size):
     if os.name == "nt":
-        return max(0, min(NUM_WORKERS, 2))
+        return recommended_windows_worker_count(NUM_WORKERS, batch_size, get_image_size(cfg))
     return NUM_WORKERS
 
 
@@ -1183,7 +870,6 @@ def build_classification_transforms(cfg, train=True):
 
 def build_loader(dataset_name, cfg, batch_size, split="train"):
     is_train = split == "train"
-    worker_count = resolve_worker_count()
     generator = torch.Generator()
     split_offset = {"train": 0, "val": 1, "test": 2}.get(split, 0)
     generator.manual_seed(RUN_SEED + split_offset)
@@ -1209,22 +895,29 @@ def build_loader(dataset_name, cfg, batch_size, split="train"):
         )
 
     effective_batch_size = max(1, min(batch_size, len(dataset)))
+    worker_count = resolve_worker_count(cfg, effective_batch_size)
+    loader_kwargs = {
+        "pin_memory": torch.cuda.is_available(),
+        "drop_last": is_train and len(dataset) > effective_batch_size,
+        "persistent_workers": worker_count > 0 and os.name != "nt",
+        "worker_init_fn": seed_worker if worker_count > 0 else None,
+        "generator": generator,
+    }
+    if worker_count > 0 and os.name == "nt":
+        # Windows file-mapping pressure is much more likely to bite large-image overnight runs.
+        loader_kwargs["prefetch_factor"] = 1
 
     return DataLoader(
         dataset,
         batch_size=effective_batch_size,
         shuffle=is_train,
         num_workers=worker_count,
-        pin_memory=torch.cuda.is_available(),
-        drop_last=is_train and len(dataset) > effective_batch_size,
-        persistent_workers=worker_count > 0,
-        generator=generator,
-        worker_init_fn=seed_worker if worker_count > 0 else None,
+        **loader_kwargs,
     )
 
 
-def build_infinite_loader(dataset_name, cfg, batch_size, split="train"):
-    loader = build_loader(dataset_name, cfg, batch_size, split=split)
+def build_infinite_loader(dataset_name, cfg, batch_size, split="train", loader=None):
+    loader = loader or build_loader(dataset_name, cfg, batch_size, split=split)
     epoch = 1
     while True:
         for batch in loader:
@@ -1267,45 +960,176 @@ def compute_class_weights(dataset_name, cfg, device):
 # ---------------------------------------------------------------------------
 
 def get_lr_multiplier(progress):
-    """LR schedule with multiple strategies.
+    """Resolve the normalized LR multiplier for the active schedule."""
+    schedule = str(LR_SCHEDULE).lower().strip() or "cosine"
+    progress = float(min(max(progress, 0.0), 1.0))
 
-    Strategies:
-        "cosine": warmup -> constant -> cosine decay (default)
-        "cosine_restart": cosine annealing with warm restarts (3 cycles)
-        "one_cycle": triangular one-cycle policy (ideal for short training)
-    """
-    if LR_SCHEDULE == "cosine_restart":
-        # Cosine annealing with warm restarts (3 cycles)
+    if schedule == "one_cycle":
+        warmup_end = min(max(WARMUP_RATIO if WARMUP_RATIO > 0 else 0.3, 0.05), 0.5)
+        if progress < warmup_end:
+            return 0.1 + 0.9 * (progress / warmup_end)
+        decay_progress = (progress - warmup_end) / max(1.0 - warmup_end, 1e-8)
+        return 0.05 + 0.95 * 0.5 * (1.0 + math.cos(math.pi * decay_progress))
+
+    if schedule == "constant":
         if progress < WARMUP_RATIO:
             return progress / WARMUP_RATIO if WARMUP_RATIO > 0 else 1.0
-        adj = (progress - WARMUP_RATIO) / (1.0 - WARMUP_RATIO)
-        n_restarts = 3
-        cycle_progress = (adj * n_restarts) % 1.0
-        return 0.5 * (1.0 + math.cos(math.pi * cycle_progress))
+        return 1.0
 
-    elif LR_SCHEDULE == "one_cycle":
-        # One-cycle policy: ramp up to peak then decay
-        if progress < 0.3:
-            # Warmup phase: ramp from 0.1x to 1x
-            return 0.1 + 0.9 * (progress / 0.3)
-        elif progress < 0.7:
-            # Sustain at peak with gentle cosine
-            p = (progress - 0.3) / 0.4
-            return 1.0 - 0.1 * (1 - math.cos(math.pi * p)) / 2
-        else:
-            # Annihilation phase: decay to near zero
-            p = (progress - 0.7) / 0.3
-            return max(0.01, 0.9 * 0.5 * (1.0 + math.cos(math.pi * p)))
+    if progress < WARMUP_RATIO:
+        return progress / WARMUP_RATIO if WARMUP_RATIO > 0 else 1.0
+    if progress < 1.0 - WARMDOWN_RATIO:
+        return 1.0
+    cooldown_progress = (1.0 - progress) / max(WARMDOWN_RATIO, 1e-8)
+    return 0.5 * (1.0 + math.cos(math.pi * (1 - cooldown_progress)))
 
-    else:
-        # Default: warmup -> constant -> cosine decay
-        if progress < WARMUP_RATIO:
-            return progress / WARMUP_RATIO if WARMUP_RATIO > 0 else 1.0
-        elif progress < 1.0 - WARMDOWN_RATIO:
-            return 1.0
-        else:
-            cooldown_progress = (1.0 - progress) / WARMDOWN_RATIO
-            return 0.5 * (1.0 + math.cos(math.pi * (1 - cooldown_progress)))
+
+# ---------------------------------------------------------------------------
+# Advanced training utilities
+# ---------------------------------------------------------------------------
+
+class ModelEMA:
+    """Maintains an exponential moving average of model parameters."""
+    def __init__(self, model, decay=0.999):
+        import copy
+        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+        self.ema_model = copy.deepcopy(raw)
+        self.ema_model.eval()
+        self.decay = decay
+        for p in self.ema_model.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model):
+        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+        for ema_p, model_p in zip(self.ema_model.parameters(), raw.parameters()):
+            ema_p.data.mul_(self.decay).add_(model_p.data, alpha=1.0 - self.decay)
+
+
+def bootstrap_ci(metric_fn, preds, targets, n_bootstraps=1000, ci=0.95):
+    """Compute bootstrap confidence interval for a metric function."""
+    rng = np.random.RandomState(42)
+    n = len(preds)
+    scores = []
+    for _ in range(n_bootstraps):
+        idx = rng.randint(0, n, size=n)
+        try:
+            score = metric_fn(preds[idx], targets[idx])
+            if not np.isnan(score):
+                scores.append(score)
+        except (ValueError, IndexError):
+            continue
+    if not scores:
+        return 0.0, 0.0, 0.0
+    scores = np.array(scores)
+    alpha = 1 - ci
+    return np.mean(scores), np.percentile(scores, 100 * alpha / 2), np.percentile(scores, 100 * (1 - alpha / 2))
+
+
+def mixup_data(images, targets, alpha=0.2):
+    """Apply MixUp augmentation."""
+    lam = torch.distributions.Beta(alpha, alpha).sample().item() if alpha > 0 else 1.0
+    index = torch.randperm(images.size(0), device=images.device)
+    mixed = lam * images + (1 - lam) * images[index]
+    return mixed, targets, targets[index], lam
+
+
+def mixup_criterion(criterion, logits, targets_a, targets_b, lam):
+    """Compute MixUp loss as weighted combination."""
+    return lam * criterion(logits, targets_a) + (1 - lam) * criterion(logits, targets_b)
+
+
+def cutmix_data(images, targets, alpha=1.0):
+    """Apply CutMix augmentation."""
+    lam = torch.distributions.Beta(alpha, alpha).sample().item() if alpha > 0 else 1.0
+    batch_size = images.size(0)
+    index = torch.randperm(batch_size, device=images.device)
+    _, _, H, W = images.shape
+    cut_ratio = math.sqrt(1.0 - lam)
+    cut_h, cut_w = int(H * cut_ratio), int(W * cut_ratio)
+    cy = torch.randint(0, H, (1,)).item()
+    cx = torch.randint(0, W, (1,)).item()
+    y1, y2 = max(0, cy - cut_h // 2), min(H, cy + cut_h // 2)
+    x1, x2 = max(0, cx - cut_w // 2), min(W, cx + cut_w // 2)
+    mixed = images.clone()
+    mixed[:, :, y1:y2, x1:x2] = images[index, :, y1:y2, x1:x2]
+    lam = 1 - (y2 - y1) * (x2 - x1) / (H * W)
+    return mixed, targets, targets[index], lam
+
+
+def get_llrd_param_groups(model, base_lr, decay=0.9):
+    """Create per-layer parameter groups with exponentially decaying LR."""
+    raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+    if not hasattr(raw, "encoder"):
+        return [{"params": model.parameters(), "lr": base_lr}]
+    encoder_params = list(raw.encoder.named_parameters())
+    head_params = [p for n, p in raw.named_parameters() if not n.startswith("encoder")]
+    layer_groups = {}
+    for name, param in encoder_params:
+        parts = name.split(".")
+        depth_key = ".".join(parts[:2]) if len(parts) > 1 else parts[0]
+        layer_groups.setdefault(depth_key, []).append(param)
+    sorted_groups = list(layer_groups.values())
+    num_layers = len(sorted_groups)
+    param_groups = [{"params": g, "lr": base_lr * (decay ** (num_layers - i))}
+                    for i, g in enumerate(sorted_groups)]
+    param_groups.append({"params": head_params, "lr": base_lr})
+    return param_groups
+
+
+@torch.no_grad()
+def tta_predict(model, images, device):
+    """Average predictions over original + horizontally flipped images."""
+    with autocast_context(device):
+        logits1 = model(images.to(device))
+        logits2 = model(torch.flip(images.to(device), dims=[-1]))
+    return (logits1 + logits2) / 2.0
+
+
+def optimize_thresholds(probs, targets, num_classes):
+    """Find optimal sigmoid threshold per class for multilabel tasks."""
+    thresholds = np.full(num_classes, 0.5)
+    for i in range(num_classes):
+        best_f1, best_t = 0.0, 0.5
+        for t in np.arange(0.1, 0.9, 0.02):
+            preds = (probs[:, i] >= t).astype(int)
+            try:
+                f1 = f1_score(targets[:, i], preds, zero_division=0)
+                if f1 > best_f1:
+                    best_f1, best_t = f1, t
+            except ValueError:
+                continue
+        thresholds[i] = best_t
+    return thresholds
+
+
+def distillation_loss(student_logits, teacher_logits, targets, criterion,
+                      alpha=0.5, temperature=3.0):
+    """Combined task loss + KL divergence from teacher soft targets."""
+    task_loss = criterion(student_logits, targets)
+    with torch.no_grad():
+        teacher_soft = F.softmax(teacher_logits / temperature, dim=-1)
+    student_log_soft = F.log_softmax(student_logits / temperature, dim=-1)
+    kd_loss = F.kl_div(student_log_soft, teacher_soft, reduction="batchmean") * (temperature ** 2)
+    return (1 - alpha) * task_loss + alpha * kd_loss
+
+
+def model_soup(checkpoint_paths, model):
+    """Average weights from multiple checkpoints (model soup)."""
+    raw = model._orig_mod if hasattr(model, "_orig_mod") else model
+    state_dicts = []
+    for path in checkpoint_paths:
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        state_dicts.append(ckpt["model_state_dict"])
+    if not state_dicts:
+        print("Model soup: no checkpoints found")
+        return model
+    avg_state = {}
+    for key in state_dicts[0]:
+        avg_state[key] = sum(sd[key].float() for sd in state_dicts) / len(state_dicts)
+    raw.load_state_dict(avg_state)
+    print(f"Model soup: averaged {len(state_dicts)} checkpoints")
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -1325,8 +1149,11 @@ def evaluate_classification_loader(model, loader, cfg, device):
     for images, targets in loader:
         images = images.to(device, non_blocking=device.type == "cuda")
         targets = targets.to(device, non_blocking=device.type == "cuda")
-        with autocast_context(device):
-            logits = model(images)
+        if USE_TTA:
+            logits = tta_predict(model, images, device)
+        else:
+            with autocast_context(device):
+                logits = model(images)
 
         loss = F.cross_entropy(logits.float(), targets, reduction="sum")
         total_loss += loss.item()
@@ -1376,8 +1203,11 @@ def evaluate_multilabel_loader(model, loader, cfg, device):
 
     for images, targets in loader:
         images = images.to(device, non_blocking=device.type == "cuda")
-        with autocast_context(device):
-            logits = model(images)
+        if USE_TTA:
+            logits = tta_predict(model, images, device)
+        else:
+            with autocast_context(device):
+                logits = model(images)
         probs = torch.sigmoid(logits.float())
         all_probs.append(probs.cpu())
         all_targets.append(targets.cpu())
@@ -1574,10 +1404,126 @@ def build_run_description(dataset_name, cfg, recipe_name, backbone_name, loss_ty
         parts.append(f"dataset={dataset_name}")
     if CURRENT_RUN_SESSION:
         parts.append(f"session={CURRENT_RUN_SESSION}")
-    parts.extend([backbone_name, OPTIMIZER, loss_type, f"{get_image_size(cfg)}px"])
-    if AUG_USE_CLAHE:
-        parts.append("clahe")
+    parts.extend(
+        [
+            backbone_name,
+            OPTIMIZER,
+            loss_type,
+            f"img={get_image_size(cfg)}",
+            f"bs={BATCH_SIZE}",
+            f"lr={LEARNING_RATE:.2e}",
+            f"wd={WEIGHT_DECAY:.2e}",
+            f"drop={DROPOUT:g}",
+            f"aug={summarize_augmentations()}",
+            f"budget={RUN_EPOCH_BUDGET}ep" if RUN_BUDGET_MODE == "epochs" else f"budget={RUN_TIME_BUDGET:.0f}s",
+        ]
+    )
+    if CURRENT_RUN_METADATA.get("mutation_op"):
+        parts.append(f"mut={CURRENT_RUN_METADATA['mutation_op']}")
+    if CURRENT_RUN_METADATA.get("base_recipe"):
+        parts.append(f"base={CURRENT_RUN_METADATA['base_recipe']}")
     return " | ".join(parts)
+
+
+def build_effective_config(
+    dataset_name,
+    cfg,
+    task,
+    num_classes,
+    backbone_name,
+    batch_size,
+    loss_type,
+    primary_metric_name=None,
+):
+    return {
+        "dataset": dataset_name,
+        "dataset_source": cfg.get("source", "builtin"),
+        "task": task,
+        "metric_name": primary_metric_name or cfg.get("metric", ""),
+        "backbone": backbone_name,
+        "num_classes": num_classes,
+        "class_names": cfg.get("class_names", []),
+        "batch_size": batch_size,
+        "dropout": DROPOUT,
+        "optimizer": OPTIMIZER,
+        "learning_rate": LEARNING_RATE,
+        "weight_decay": WEIGHT_DECAY,
+        "label_smoothing": LABEL_SMOOTHING,
+        "loss": loss_type,
+        "recipe": CURRENT_RUN_RECIPE,
+        "recipe_source": CURRENT_RUN_RECIPE_SOURCE,
+        "session": CURRENT_RUN_SESSION,
+        "seed": RUN_SEED,
+        "time_budget_seconds": RUN_TIME_BUDGET if RUN_BUDGET_MODE == "time" else None,
+        "budget_mode": RUN_BUDGET_MODE,
+        "epoch_budget": RUN_EPOCH_BUDGET,
+        "selection_split": "val",
+        "image_size": get_image_size(cfg),
+        "model": {
+            "backbone": BACKBONE,
+            "pretrained": PRETRAINED,
+            "dropout": DROPOUT,
+        },
+        "training": {
+            "batch_size": batch_size,
+            "learning_rate": LEARNING_RATE,
+            "optimizer": OPTIMIZER,
+            "weight_decay": WEIGHT_DECAY,
+            "warmup_ratio": WARMUP_RATIO,
+            "warmdown_ratio": WARMDOWN_RATIO,
+            "label_smoothing": LABEL_SMOOTHING,
+        },
+        "loss_config": {
+            "type": loss_type,
+            "class_weights": USE_CLASS_WEIGHTS,
+            "focal_gamma": FOCAL_GAMMA,
+            "tversky_alpha": TVERSKY_ALPHA,
+            "tversky_beta": TVERSKY_BETA,
+        },
+        "augmentations": {
+            "horizontal_flip": AUG_HORIZONTAL_FLIP,
+            "vertical_flip": AUG_VERTICAL_FLIP,
+            "rotation": AUG_ROTATION_DEGREES,
+            "color_jitter": AUG_COLOR_JITTER,
+            "color_jitter_brightness": AUG_COLOR_JITTER_BRIGHTNESS,
+            "color_jitter_contrast": AUG_COLOR_JITTER_CONTRAST,
+            "clahe": AUG_USE_CLAHE,
+            "elastic_transform": ELASTIC_TRANSFORM,
+            "grid_distortion": GRID_DISTORTION,
+            "coarse_dropout": COARSE_DROPOUT,
+            "coarse_dropout_ratio": COARSE_DROPOUT_RATIO,
+        },
+        "advanced": {
+            "ema": USE_EMA,
+            "ema_decay": EMA_DECAY,
+            "tta": USE_TTA,
+            "compile": USE_COMPILE,
+            "lr_schedule": LR_SCHEDULE,
+            "grad_accum_steps": GRAD_ACCUM_STEPS,
+            "mixup": USE_MIXUP,
+            "mixup_alpha": MIXUP_ALPHA,
+            "cutmix": USE_CUTMIX,
+            "cutmix_alpha": CUTMIX_ALPHA,
+            "swa": USE_SWA,
+            "swa_start_ratio": SWA_START_RATIO,
+        },
+        "search_metadata": dict(CURRENT_RUN_METADATA),
+    }
+
+
+def dump_effective_config(path, config):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.suffix.lower() == ".json":
+        target.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+        return
+    try:
+        import yaml
+    except ImportError:
+        target.write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
+        return
+    with open(target, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(config, handle, sort_keys=False)
 
 def save_checkpoint(model, results, config, path):
     """Save model checkpoint with metadata."""
@@ -1628,7 +1574,9 @@ def primary_metric_for_results(results, cfg):
 
 
 def main():
-    global CURRENT_RUN_DATASET, CURRENT_RUN_RECIPE, CURRENT_RUN_BACKBONE, CURRENT_RUN_SESSION, RUN_TIME_BUDGET
+    global CURRENT_RUN_DATASET, CURRENT_RUN_RECIPE, CURRENT_RUN_BACKBONE, CURRENT_RUN_SESSION
+    global CURRENT_RUN_METADATA, CURRENT_RUN_RECIPE_SOURCE, RUN_TIME_BUDGET
+    global RUN_BUDGET_MODE, RUN_EPOCH_BUDGET
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default=None)
     parser.add_argument(
@@ -1636,6 +1584,12 @@ def main():
         type=str,
         default=None,
         help="Load a recipe from recipes/ (for example: chexnet, aptos_winner)",
+    )
+    parser.add_argument(
+        "--recipe-file",
+        type=str,
+        default=None,
+        help="Load a recipe from an explicit YAML path (for adaptive search overlays).",
     )
     parser.add_argument(
         "--save-checkpoint",
@@ -1649,10 +1603,22 @@ def main():
         help="Optional override for smoke tests. Defaults to the 300s autoresearch budget.",
     )
     parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Optional epoch budget for a full-train refinement run. Keeps search-time 300s mode unchanged unless explicitly set.",
+    )
+    parser.add_argument(
         "--session",
         type=str,
         default=None,
         help="Optional run-session tag used to isolate a fresh overnight search in results.tsv and downstream artifacts.",
+    )
+    parser.add_argument(
+        "--dump-effective-config",
+        type=str,
+        default=None,
+        help="Optional path to write the fully resolved training config used for this run.",
     )
     parser.add_argument("--list-recipes", action="store_true", help="List available recipes and exit")
     args = parser.parse_args()
@@ -1661,16 +1627,43 @@ def main():
         list_recipes()
         return
 
+    if args.recipe and args.recipe_file:
+        raise ValueError("Use either --recipe or --recipe-file, not both")
+    if args.time_budget is not None and args.epochs is not None:
+        raise ValueError("Use either --time-budget or --epochs, not both")
+
+    recipe = None
+    recipe_source = ""
+    run_recipe_name = ""
     if args.recipe:
         recipe = load_recipe(args.recipe)
+        recipe_source = str((Path(__file__).parent / "recipes" / f"{args.recipe}.yaml").resolve())
+        run_recipe_name = args.recipe
+    elif args.recipe_file:
+        recipe_path = Path(args.recipe_file).expanduser().resolve()
+        recipe = load_recipe_file(recipe_path)
+        recipe_source = str(recipe_path)
+        run_recipe_name = recipe_path.stem
+
+    CURRENT_RUN_METADATA = {}
+    CURRENT_RUN_RECIPE_SOURCE = recipe_source
+    if recipe:
+        if isinstance(recipe.get("search_metadata"), dict):
+            CURRENT_RUN_METADATA = dict(recipe["search_metadata"])
         apply_recipe(recipe)
 
     dataset = args.dataset or DATASET
     CURRENT_RUN_DATASET = dataset
-    CURRENT_RUN_RECIPE = args.recipe or ""
+    CURRENT_RUN_RECIPE = run_recipe_name
     CURRENT_RUN_SESSION = (args.session or "").strip()
-    RUN_TIME_BUDGET = float(args.time_budget) if args.time_budget is not None else float(TIME_BUDGET)
-    if RUN_TIME_BUDGET <= 0:
+    RUN_EPOCH_BUDGET = int(args.epochs) if args.epochs is not None else None
+    if RUN_EPOCH_BUDGET is not None and RUN_EPOCH_BUDGET <= 0:
+        raise ValueError("--epochs must be positive")
+    RUN_BUDGET_MODE = "epochs" if RUN_EPOCH_BUDGET is not None else "time"
+    RUN_TIME_BUDGET = 0.0 if RUN_BUDGET_MODE == "epochs" else (
+        float(args.time_budget) if args.time_budget is not None else float(TIME_BUDGET)
+    )
+    if RUN_BUDGET_MODE == "time" and RUN_TIME_BUDGET <= 0:
         raise ValueError("--time-budget must be positive")
     cfg = get_dataset_config(dataset)
     task = cfg["task"]
@@ -1700,18 +1693,13 @@ def main():
             backbone=BACKBONE,
             pretrained=PRETRAINED,
             dropout=DROPOUT,
-            multilabel=is_multilabel,
         )
         batch_size = BATCH_SIZE
     elif task == "segmentation":
         if SEG_BACKBONE:
-            model = PretrainedUNet(
-                num_classes=num_classes,
-                backbone=SEG_BACKBONE,
-                pretrained=PRETRAINED,
-                in_channels=cfg["in_channels"],
-                use_attention=SEG_USE_ATTENTION,
-            )
+            model = PretrainedUNet(num_classes=num_classes, backbone=SEG_BACKBONE,
+                                   pretrained=PRETRAINED, in_channels=cfg["in_channels"],
+                                   use_attention=SEG_USE_ATTENTION)
         else:
             model = UNetMedical(
                 num_classes=num_classes,
@@ -1724,58 +1712,32 @@ def main():
         raise ValueError(f"Unknown task: {task}")
 
     model = model.to(device)
-
-    # Gradual unfreezing: freeze backbone initially
-    if USE_GRADUAL_UNFREEZE and task in ("classification", "multilabel"):
-        raw = model
-        if hasattr(model, "_orig_mod"):
-            raw = model._orig_mod
-        for param in raw.encoder.parameters():
-            param.requires_grad = False
-        print("Gradual unfreeze: backbone frozen initially")
-
     model = maybe_compile_model(model, device)
     num_params = sum(param.numel() for param in model.parameters())
-    backbone_name = BACKBONE if task != "segmentation" else (SEG_BACKBONE or "unet")
+    backbone_name = BACKBONE if task != "segmentation" else "unet"
     CURRENT_RUN_BACKBONE = backbone_name
-
-    # EMA setup
-    ema = None
-    if USE_EMA:
-        ema = ModelEMA(model, decay=EMA_DECAY)
-        print(f"EMA enabled (decay={EMA_DECAY})")
 
     print(f"Model: {backbone_name}")
     print(f"Pretrained: {PRETRAINED}")
     print(f"Parameters: {num_params:,}")
-    print(f"Time budget: {RUN_TIME_BUDGET}s")
+    if RUN_BUDGET_MODE == "epochs":
+        print(f"Epoch budget: {RUN_EPOCH_BUDGET}")
+    else:
+        print(f"Time budget: {RUN_TIME_BUDGET}s")
     print(f"Batch size: {batch_size}")
     print(f"Optimizer: {OPTIMIZER}")
     print(f"Learning rate: {LEARNING_RATE}")
     print(f"Image size: {get_image_size(cfg)}")
-
-    # Optimizer -- with LLRD, discriminative LR, or standard
-    if USE_LLRD and task in ("classification", "multilabel"):
-        param_groups = get_llrd_param_groups(model, LEARNING_RATE, decay=LLRD_DECAY)
-        print(f"LLRD enabled (decay={LLRD_DECAY}, {len(param_groups)} groups)")
-    elif DISCRIMINATIVE_LR and task in ("classification", "multilabel"):
-        raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-        param_groups = [
-            {"params": raw.encoder.parameters(), "lr": LEARNING_RATE * BACKBONE_LR_FACTOR},
-            {"params": raw.head.parameters(), "lr": LEARNING_RATE},
-            {"params": raw.dropout.parameters(), "lr": LEARNING_RATE},
-        ]
-        print(f"Discriminative LR: backbone={LEARNING_RATE * BACKBONE_LR_FACTOR:.6f}, head={LEARNING_RATE:.6f}")
-    else:
-        param_groups = [{"params": model.parameters(), "lr": LEARNING_RATE}]
+    if LR_SCHEDULE != "cosine":
+        print(f"LR schedule: {LR_SCHEDULE}")
 
     if OPTIMIZER == "adam":
-        optimizer = torch.optim.Adam(param_groups, weight_decay=WEIGHT_DECAY)
+        optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     elif OPTIMIZER == "adamw":
-        optimizer = torch.optim.AdamW(param_groups, weight_decay=WEIGHT_DECAY)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     elif OPTIMIZER == "sgd":
         optimizer = torch.optim.SGD(
-            param_groups, momentum=0.9, weight_decay=WEIGHT_DECAY
+            model.parameters(), lr=LEARNING_RATE, momentum=0.9, weight_decay=WEIGHT_DECAY
         )
     else:
         raise ValueError(f"Unknown optimizer: {OPTIMIZER}")
@@ -1805,8 +1767,6 @@ def main():
         )
     elif loss_type == "dice_bce":
         criterion = DiceBCELoss(dice_weight=0.5)
-    elif loss_type == "tversky":
-        criterion = TverskyLoss(alpha=TVERSKY_ALPHA, beta=TVERSKY_BETA)
     elif loss_type == "tversky_bce":
         criterion = TverskyBCELoss(alpha=TVERSKY_ALPHA, beta=TVERSKY_BETA)
     elif loss_type == "ordinal":
@@ -1819,54 +1779,30 @@ def main():
         print("Class weighting: enabled")
     print()
 
-    train_loader = build_infinite_loader(dataset, cfg, batch_size, split="train")
+    effective_config = build_effective_config(
+        dataset_name=dataset,
+        cfg=cfg,
+        task=task,
+        num_classes=num_classes,
+        backbone_name=backbone_name,
+        batch_size=batch_size,
+        loss_type=loss_type,
+    )
+    if args.dump_effective_config:
+        dump_effective_config(args.dump_effective_config, effective_config)
+
+    train_epoch_loader = build_loader(dataset, cfg, batch_size, split="train")
+    steps_per_epoch = max(len(train_epoch_loader), 1)
+    total_step_budget = steps_per_epoch * RUN_EPOCH_BUDGET if RUN_EPOCH_BUDGET is not None else None
+    train_loader = build_infinite_loader(dataset, cfg, batch_size, split="train", loader=train_epoch_loader)
     val_loader = build_loader(dataset, cfg, batch_size, split="val")
     images, targets, epoch = next(train_loader)
-
-    # -----------------------------------------------------------------------
-    # Training loop setup
-    # -----------------------------------------------------------------------
 
     smooth_train_loss = 0.0
     total_training_time = 0.0
     step = 0
-    accum_step = 0
-    lrm = 0.0  # will be set on first optimizer step
-    backbone_unfrozen = not USE_GRADUAL_UNFREEZE
-    loss_history = []  # for richer checkpoints
-
-    # SWA setup
-    swa_model = None
-    swa_started = False
-    if USE_SWA:
-        print(f"SWA enabled (starts at {SWA_START_RATIO*100:.0f}% progress)")
-
-    # Teacher model for distillation
-    teacher_model = None
-    if USE_DISTILLATION and TEACHER_CHECKPOINT and os.path.exists(TEACHER_CHECKPOINT):
-        teacher_ckpt = torch.load(TEACHER_CHECKPOINT, map_location=device, weights_only=False)
-        teacher_cfg = teacher_ckpt.get("config", {})
-        teacher_backbone = teacher_cfg.get("backbone", BACKBONE)
-        teacher_model = MedicalClassifier(
-            num_classes=num_classes, backbone=teacher_backbone,
-            pretrained=False, dropout=0.0, multilabel=is_multilabel,
-        ).to(device)
-        teacher_model.load_state_dict(teacher_ckpt["model_state_dict"])
-        teacher_model.eval()
-        for p in teacher_model.parameters():
-            p.requires_grad_(False)
-        print(f"Distillation: teacher loaded from {TEACHER_CHECKPOINT}")
-
-    if GRAD_ACCUM_STEPS > 1:
-        print(f"Gradient accumulation: {GRAD_ACCUM_STEPS} steps (effective BS={batch_size * GRAD_ACCUM_STEPS})")
-    if USE_MIXUP:
-        print(f"MixUp enabled (alpha={MIXUP_ALPHA})")
-    if USE_CUTMIX:
-        print(f"CutMix enabled (alpha={CUTMIX_ALPHA})")
-    if LR_SCHEDULE != "cosine":
-        print(f"LR schedule: {LR_SCHEDULE}")
-
     model.train()
+    ema_model = ModelEMA(model, decay=EMA_DECAY) if USE_EMA else None
 
     while True:
         if device.type == "cuda":
@@ -1876,95 +1812,29 @@ def main():
         images_d = images.to(device, non_blocking=device.type == "cuda")
         targets_d = targets.to(device, non_blocking=device.type == "cuda")
 
-        # MixUp or CutMix (randomly choose one per batch)
-        use_mix = False
-        if USE_MIXUP and USE_CUTMIX:
-            if torch.rand(1).item() < 0.5:
-                images_d, targets_a, targets_b, lam = mixup_data(images_d, targets_d, MIXUP_ALPHA)
-            else:
-                images_d, targets_a, targets_b, lam = cutmix_data(images_d, targets_d, CUTMIX_ALPHA)
-            use_mix = True
-        elif USE_MIXUP:
-            images_d, targets_a, targets_b, lam = mixup_data(images_d, targets_d, MIXUP_ALPHA)
-            use_mix = True
-        elif USE_CUTMIX:
-            images_d, targets_a, targets_b, lam = cutmix_data(images_d, targets_d, CUTMIX_ALPHA)
-            use_mix = True
-
         with autocast_context(device):
             logits = model(images_d)
-            if use_mix:
-                loss = mixup_criterion(criterion, logits, targets_a, targets_b, lam)
-            elif teacher_model is not None:
-                with torch.no_grad():
-                    teacher_logits = teacher_model(images_d)
-                loss = distillation_loss(
-                    logits, teacher_logits, targets_d, criterion,
-                    alpha=DISTILL_ALPHA, temperature=DISTILL_TEMPERATURE,
-                )
-            else:
-                loss = criterion(logits, targets_d)
-            if GRAD_ACCUM_STEPS > 1:
-                loss = loss / GRAD_ACCUM_STEPS
+            loss = criterion(logits, targets_d)
 
         scaler.scale(loss).backward()
-        accum_step += 1
 
-        # Only step optimizer after accumulation
-        if accum_step % GRAD_ACCUM_STEPS == 0:
+        if RUN_BUDGET_MODE == "epochs":
+            progress = min(step / max(total_step_budget, 1), 1.0)
+        else:
             progress = min(total_training_time / RUN_TIME_BUDGET, 1.0)
-            lrm = get_lr_multiplier(progress)
+        lrm = get_lr_multiplier(progress)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = LEARNING_RATE * lrm
 
-            # Gradual unfreeze check
-            if not backbone_unfrozen and progress >= UNFREEZE_AFTER_RATIO:
-                raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-                for param in raw.encoder.parameters():
-                    param.requires_grad = True
-                backbone_unfrozen = True
-                print(f"\nBackbone unfrozen at {progress*100:.1f}% progress")
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+        if ema_model is not None:
+            ema_model.update(model)
 
-            if DISCRIMINATIVE_LR:
-                for i, param_group in enumerate(optimizer.param_groups):
-                    if i == 0:  # backbone
-                        param_group["lr"] = LEARNING_RATE * BACKBONE_LR_FACTOR * lrm
-                    else:  # head / dropout
-                        param_group["lr"] = LEARNING_RATE * lrm
-            else:
-                for param_group in optimizer.param_groups:
-                    param_group["lr"] = LEARNING_RATE * lrm
-
-            # Gradient clipping
-            if GRAD_CLIP_NORM > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
-
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad(set_to_none=True)
-
-            # EMA update
-            if ema is not None:
-                ema.update(model)
-
-            # SWA update
-            if USE_SWA and progress >= SWA_START_RATIO:
-                if not swa_started:
-                    raw = model._orig_mod if hasattr(model, "_orig_mod") else model
-                    swa_model = torch.optim.swa_utils.AveragedModel(raw)
-                    swa_started = True
-                    print(f"\nSWA started at {progress*100:.1f}% progress")
-                swa_model.update_parameters(
-                    model._orig_mod if hasattr(model, "_orig_mod") else model
-                )
-
-        train_loss_f = loss.item() * (GRAD_ACCUM_STEPS if GRAD_ACCUM_STEPS > 1 else 1)
-
+        train_loss_f = loss.item()
         if train_loss_f > 100 or train_loss_f != train_loss_f:
             raise RuntimeError("loss exploded or became NaN")
-
-        # Track loss history for checkpoints (every 100 steps)
-        if step % 100 == 0:
-            loss_history.append({"step": step, "loss": round(train_loss_f, 6)})
 
         images, targets, epoch = next(train_loader)
 
@@ -1973,24 +1843,29 @@ def main():
         t1 = time.time()
         dt = t1 - t0
 
-        if step > 5:
+        if RUN_BUDGET_MODE == "epochs":
+            total_training_time += dt
+        elif step > 5:
             total_training_time += dt
 
         ema_beta = 0.9
         smooth_train_loss = ema_beta * smooth_train_loss + (1 - ema_beta) * train_loss_f
         debiased_smooth_loss = smooth_train_loss / (1 - ema_beta ** (step + 1))
-        progress = min(total_training_time / RUN_TIME_BUDGET, 1.0)
         pct_done = 100 * progress
-        remaining = max(0.0, RUN_TIME_BUDGET - total_training_time)
-        current_lr = LEARNING_RATE * lrm
+        display_epoch = epoch if RUN_BUDGET_MODE == "time" else min((step // steps_per_epoch) + 1, RUN_EPOCH_BUDGET)
+        if RUN_BUDGET_MODE == "epochs":
+            remaining_steps = max(0, total_step_budget - step)
+            remaining_display = f"{remaining_steps / steps_per_epoch:.1f}ep"
+        else:
+            remaining_display = f"{max(0.0, RUN_TIME_BUDGET - total_training_time):.0f}s"
 
         print(
             f"\rstep {step:05d} ({pct_done:.1f}%) | "
             f"loss: {debiased_smooth_loss:.4f} | "
-            f"lr: {current_lr:.6f} | "
+            f"lr: {LEARNING_RATE * lrm:.6f} | "
             f"dt: {dt * 1000:.0f}ms | "
-            f"epoch: {epoch} | "
-            f"remaining: {remaining:.0f}s    ",
+            f"epoch: {display_epoch} | "
+            f"remaining: {remaining_display}    ",
             end="",
             flush=True,
         )
@@ -2003,104 +1878,28 @@ def main():
             gc.collect()
 
         step += 1
-        if step > 5 and total_training_time >= RUN_TIME_BUDGET:
+        if RUN_BUDGET_MODE == "epochs":
+            if step >= total_step_budget:
+                break
+        elif step > 5 and total_training_time >= RUN_TIME_BUDGET:
             break
 
     print()
-
-    # -----------------------------------------------------------------------
-    # Evaluation
-    # -----------------------------------------------------------------------
-
-    # Choose eval model: SWA > EMA > base
-    eval_model = model
-    if swa_model is not None:
-        # Update BN statistics for SWA model
-        swa_loader = build_loader(dataset, cfg, batch_size, split="train")
-        torch.optim.swa_utils.update_bn(swa_loader, swa_model, device=device)
-        eval_model = swa_model
-        print("Using SWA model for evaluation")
-    elif ema is not None:
-        eval_model = ema.ema_model.to(device)
-        print("Using EMA model for evaluation")
-
-    # Model soup mode
-    if USE_MODEL_SOUP and SOUP_CHECKPOINTS:
-        eval_model = model_soup(SOUP_CHECKPOINTS, eval_model)
-
-    eval_model.eval()
     print("---")
 
-    per_class_thresholds = None
-    confidence_intervals = None
-
+    eval_model = ema_model.ema_model if ema_model is not None else model
     if task == "multilabel":
         results = evaluate_multilabel_loader(eval_model, val_loader, cfg, device)
         print(f"mean_auc:         {results['mean_auc']:.2f}%")
-
-        # Bootstrap confidence intervals
-        if COMPUTE_CI:
-            all_probs = results["artifacts"]["val_probs"].astype(np.float32)
-            all_targets = results["artifacts"]["val_targets"].astype(np.float32)
-            def _mean_auc_fn(p, t):
-                aucs = []
-                for i in range(p.shape[1]):
-                    try:
-                        aucs.append(roc_auc_score(t[:, i], p[:, i]))
-                    except ValueError:
-                        pass
-                return 100.0 * np.mean(aucs) if aucs else 0.0
-            _, ci_lower, ci_upper = bootstrap_ci(
-                _mean_auc_fn, all_probs, all_targets, n_bootstraps=CI_BOOTSTRAPS,
-            )
-            confidence_intervals = {"mean_auc": {"lower": ci_lower, "upper": ci_upper}}
-            print(f"mean_auc_ci:      {results['mean_auc']:.2f}% (95% CI: {ci_lower:.2f}-{ci_upper:.2f})")
-
         print("per_class_auc:")
         for pathology, auc in results["per_class_auc"].items():
             print(f"  {pathology:<22s} {auc:.2f}%")
-
-        # Per-class threshold optimization
-        if OPTIMIZE_THRESHOLDS and "artifacts" in results:
-            per_class_thresholds = optimize_thresholds(
-                results["artifacts"]["val_probs"].astype(np.float32),
-                results["artifacts"]["val_targets"].astype(np.float32),
-                num_classes,
-            )
-            class_names = cfg.get("class_names", [f"class_{i}" for i in range(num_classes)])
-            print("optimized_thresholds:")
-            for i, name in enumerate(class_names):
-                print(f"  {name:<22s} {per_class_thresholds[i]:.2f}")
-
     elif task == "classification":
         results = evaluate_classification_loader(eval_model, val_loader, cfg, device)
         print(f"val_accuracy:     {results['accuracy']:.2f}%")
         print(f"val_auc:          {results['auc']:.2f}%")
         print(f"val_kappa:        {results['kappa']:.4f}")
         print(f"val_loss:         {results['loss']:.6f}")
-
-        # Bootstrap confidence intervals
-        if COMPUTE_CI:
-            all_probs = results["artifacts"]["val_probs"].astype(np.float32)
-            all_targets = results["artifacts"]["val_targets"].astype(np.int64)
-            metric_name_for_ci = cfg.get("metric", "accuracy")
-            if metric_name_for_ci == "quadratic_kappa":
-                def _kappa_fn(p, t):
-                    return cohen_kappa_score(t, p.argmax(axis=1), weights="quadratic")
-                _, ci_lower, ci_upper = bootstrap_ci(
-                    _kappa_fn, all_probs, all_targets, n_bootstraps=CI_BOOTSTRAPS,
-                )
-                confidence_intervals = {"primary": {"lower": ci_lower, "upper": ci_upper}}
-                print(f"confidence_int:   {results['kappa']:.4f} (95% CI: {ci_lower:.4f}-{ci_upper:.4f})")
-            else:
-                def _acc_fn(p, t):
-                    return 100.0 * (p.argmax(axis=1) == t).mean()
-                _, ci_lower, ci_upper = bootstrap_ci(
-                    _acc_fn, all_probs, all_targets, n_bootstraps=CI_BOOTSTRAPS,
-                )
-                confidence_intervals = {"primary": {"lower": ci_lower, "upper": ci_upper}}
-                print(f"confidence_int:   {results['accuracy']:.2f}% (95% CI: {ci_lower:.2f}-{ci_upper:.2f})")
-
     else:
         results = evaluate_segmentation_loader(eval_model, val_loader, device)
         print(f"val_dice:         {results['dice']:.2f}%")
@@ -2109,99 +1908,47 @@ def main():
         print(f"val_sensitivity:  {results['sensitivity']:.2f}%")
         print(f"val_specificity:  {results['specificity']:.2f}%")
 
-    # Grad-CAM generation
-    if GENERATE_GRADCAM and task in ("classification", "multilabel"):
-        print("Generating Grad-CAM heatmaps...")
-        generate_gradcam(eval_model, val_loader, device,
-                         num_samples=GRADCAM_NUM_SAMPLES)
-
-    # ONNX export
-    if EXPORT_ONNX:
-        img_size = get_image_size(cfg)
-        in_ch = 3  # pretrained backbones always expect 3ch
-        export_onnx(eval_model, (in_ch, img_size, img_size),
-                     dataset_name=dataset)
-
     metric_name, primary_metric = primary_metric_for_results(results, cfg)
     t_end = time.time()
     peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024 if device.type == "cuda" else 0.0
     memory_gb = peak_vram_mb / 1024.0
 
+    completed_epochs = epoch if RUN_BUDGET_MODE == "time" else math.ceil(step / max(steps_per_epoch, 1))
     print(f"training_seconds: {total_training_time:.1f}")
     print(f"total_seconds:    {t_end - t_start:.1f}")
     print(f"peak_vram_mb:     {peak_vram_mb:.1f}")
     print(f"num_steps:        {step}")
     print(f"num_params_M:     {num_params / 1e6:.1f}")
-    print(f"num_epochs:       {epoch}")
+    print(f"num_epochs:       {completed_epochs}")
+    if RUN_BUDGET_MODE == "epochs":
+        print(f"epoch_budget:     {RUN_EPOCH_BUDGET}")
     print(f"dataset:          {dataset}")
     if CURRENT_RUN_SESSION:
         print(f"session:          {CURRENT_RUN_SESSION}")
     print(f"task:             {task}")
     print(f"backbone:         {backbone_name}")
-    if args.recipe:
-        print(f"recipe:           {args.recipe}")
+    if CURRENT_RUN_RECIPE:
+        print(f"recipe:           {CURRENT_RUN_RECIPE}")
 
     checkpoint_path = ""
     if args.save_checkpoint:
-        ckpt_config = {
-            "dataset": dataset,
-            "dataset_source": cfg.get("source", "builtin"),
-            "task": task,
-            "metric_name": metric_name,
-            "backbone": backbone_name,
-            "num_classes": num_classes,
-            "class_names": cfg.get("class_names", []),
-            "batch_size": batch_size,
-            "dropout": DROPOUT,
-            "optimizer": OPTIMIZER,
-            "learning_rate": LEARNING_RATE,
-            "weight_decay": WEIGHT_DECAY,
-            "loss": loss_type,
-            "recipe": args.recipe,
-            "session": CURRENT_RUN_SESSION,
-            "seed": RUN_SEED,
-            "time_budget_seconds": RUN_TIME_BUDGET,
-            "selection_split": "val",
-            "image_size": get_image_size(cfg),
-            "ema": USE_EMA, "mixup": USE_MIXUP,
-            "cutmix": USE_CUTMIX, "swa": USE_SWA,
-            "llrd": USE_LLRD, "llrd_decay": LLRD_DECAY,
-            "lr_schedule": LR_SCHEDULE,
-            "grad_accum_steps": GRAD_ACCUM_STEPS,
-            "grad_clip_norm": GRAD_CLIP_NORM,
-            "gradual_unfreeze": USE_GRADUAL_UNFREEZE,
-            "discriminative_lr": DISCRIMINATIVE_LR,
-            "distillation": USE_DISTILLATION,
-            "seg_backbone": SEG_BACKBONE,
-            "seg_attention": SEG_USE_ATTENTION,
-            "augmentations": {
-                "horizontal_flip": AUG_HORIZONTAL_FLIP,
-                "vertical_flip": AUG_VERTICAL_FLIP,
-                "rotation": AUG_ROTATION_DEGREES,
-                "color_jitter": AUG_COLOR_JITTER,
-                "clahe": AUG_USE_CLAHE,
-                "elastic_transform": ELASTIC_TRANSFORM,
-                "grid_distortion": GRID_DISTORTION,
-                "coarse_dropout": COARSE_DROPOUT,
-            },
-        }
+        ckpt_config = dict(effective_config)
+        ckpt_config["metric_name"] = metric_name
         ckpt_name = f"{dataset}_{backbone_name}_{primary_metric:.2f}.pth"
         checkpoint_path = os.path.join(CHECKPOINT_DIR, ckpt_name)
-        save_model = swa_model if swa_model is not None else (
-            ema.ema_model if ema is not None else model)
-        save_checkpoint(save_model, results, ckpt_config, checkpoint_path)
+        save_checkpoint(eval_model, results, ckpt_config, checkpoint_path)
 
     append_results_row(
         dataset=dataset,
-        recipe=args.recipe,
+        recipe=CURRENT_RUN_RECIPE,
         backbone=backbone_name,
         metric_name=metric_name,
         metric=primary_metric,
         memory_gb=memory_gb,
         status="candidate",
         checkpoint_path=checkpoint_path,
-        description=build_run_description(dataset, cfg, args.recipe, backbone_name, loss_type),
-        metadata=current_results_metadata(cfg, loss_type, task=task),
+        description=build_run_description(dataset, cfg, CURRENT_RUN_RECIPE, backbone_name, loss_type),
+        metadata=current_results_metadata(cfg, loss_type, batch_size=batch_size),
     )
 
 
@@ -2210,6 +1957,17 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         try:
+            crash_metadata = {
+                "session": CURRENT_RUN_SESSION or "",
+                "seed": str(RUN_SEED),
+                "budget_mode": RUN_BUDGET_MODE,
+                "time_budget_seconds": f"{RUN_TIME_BUDGET:.1f}" if RUN_BUDGET_MODE == "time" else "",
+                "epoch_budget": str(RUN_EPOCH_BUDGET or ""),
+            }
+            for key, value in CURRENT_RUN_METADATA.items():
+                if key in RESULTS_HEADER:
+                    crash_metadata[key] = stringify_results_value(value)
+            crash_metadata["failure_reason"] = f"{type(exc).__name__}: {exc}"
             append_results_row(
                 dataset=CURRENT_RUN_DATASET,
                 recipe=CURRENT_RUN_RECIPE,
@@ -2220,7 +1978,7 @@ if __name__ == "__main__":
                 status="crash",
                 checkpoint_path="",
                 description=f"crash: {type(exc).__name__}: {exc}",
-                metadata={"session": CURRENT_RUN_SESSION or "", "seed": str(RUN_SEED)},
+                metadata=crash_metadata,
             )
         except Exception:
             pass
