@@ -180,10 +180,10 @@ uv run python tools/run_full_train.py \
   --train-session chestxray14_stage2_refine_fulltrain
 ```
 
-See [docs/LOCAL_OVERNIGHT_RUN.md](docs/LOCAL_OVERNIGHT_RUN.md),
-[docs/COLAB_OVERNIGHT_RUN.md](docs/COLAB_OVERNIGHT_RUN.md), and
-[docs/MEDICAL_IMAGING_AUTORESEARCH.md](docs/MEDICAL_IMAGING_AUTORESEARCH.md)
-for the longer-form runbooks and case study.
+See [docs/LOCAL_OVERNIGHT_RUN.md](docs/LOCAL_OVERNIGHT_RUN.md) and
+[docs/COLAB_OVERNIGHT_RUN.md](docs/COLAB_OVERNIGHT_RUN.md) for the longer-form
+runbooks. A separate ChestXray14 case study lives in
+[docs/MEDICAL_IMAGING_AUTORESEARCH.md](docs/MEDICAL_IMAGING_AUTORESEARCH.md).
 
 ## Repo Layout
 

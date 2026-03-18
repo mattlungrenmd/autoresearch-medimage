@@ -1,7 +1,9 @@
-# Foundation Models
+# Optional Foundation Model Notes
 
 This repo can use some HuggingFace-hosted vision encoders for 2D medical
 imaging by prefixing the backbone with `hf:`.
+
+This is optional reference material, not part of the default README workflow.
 
 ## Current Scope
 

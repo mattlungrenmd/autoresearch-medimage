@@ -1,11 +1,11 @@
-# Medical Imaging vs `karpathy/autoresearch`
+# ChestXray14 Case Study: Medical Imaging vs `karpathy/autoresearch`
 
 This repo is intentionally close to the spirit of
 [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch), but
 medical-imaging workloads forced a few important differences.
 
-This document is a worked case study from one ChestXray14 experiment series. It
-is here to explain why the repo includes optional refinement and promotion
+This document is a worked example from one ChestXray14 experiment series. It is
+here to explain why the repo includes optional refinement and promotion
 helpers, not to claim that every dataset, backbone family, or time budget will
 behave the same way.
 
