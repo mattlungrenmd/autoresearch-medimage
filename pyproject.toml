@@ -39,17 +39,3 @@ all = [
 
 [project.urls]
 Repository = "https://github.com/mlungrengmail/autoresearch-medimage"
-
-[tool.uv]
-find-links = [
-    "https://download.pytorch.org/whl/cu124",
-]
-
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu124" }
-torchvision = { index = "pytorch-cu124" }
