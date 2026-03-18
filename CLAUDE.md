@@ -13,8 +13,8 @@ The core contract:
 - `program.md` describes the search loop
 - `results.tsv` is the untracked experiment ledger
 
-Workflow: **search** (50-100 quick experiments) → **train** (winning config,
-full compute budget) → **report** (paper and figures from the final model).
+Workflow: **search** (50-100 quick experiments) -> **train** (winning config,
+full compute budget) -> **report** (paper and figures from the final model).
 
 Public v1 scope: 2D classification, 2D multilabel classification, binary
 segmentation.

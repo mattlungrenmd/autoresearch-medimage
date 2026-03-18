@@ -210,7 +210,6 @@ If `--finalize` is enabled, the helper also refreshes:
 - `paper/generated/chestxray14_final_eval.pt`
 - `paper/generated/chestxray14_figures/`
 - `paper/generated/chestxray14_overnight.tex`
-- `regulatory/generated/chestxray14_overnight/`
 
 ## Resume After Interruption
 

@@ -249,7 +249,7 @@ If you only want the single best refined candidate instead:
 Use this in a fresh agent session attached to the Colab workspace:
 
 ```text
-Read AGENTS.md, docs/OVERNIGHT_CHEXNET_RUN.md, docs/CHEXNET_HELLO_WORLD.md, CLAUDE.md, program.md, prepare.py, train.py, results.tsv, and run.log if present.
+Read README.md, docs/OVERNIGHT_CHEXNET_RUN.md, docs/CHEXNET_HELLO_WORLD.md, CLAUDE.md, program.md, prepare.py, train.py, results.tsv, and run.log if present.
 
 We are running a separate Colab overnight session on chestxray14.
 
@@ -333,7 +333,6 @@ When the session is done:
 !uv run python tools/finalize_run.py --dataset chestxray14 --session $SESSION --compile-paper
 !cp /content/autoresearch-medimage-colab/progress.png "$DRIVE_ROOT/artifacts/progress.png" || true
 !cp -r /content/autoresearch-medimage-colab/paper/generated "$DRIVE_ROOT/artifacts/paper-generated" || true
-!cp -r /content/autoresearch-medimage-colab/regulatory/generated "$DRIVE_ROOT/artifacts/regulatory-generated" || true
 !cp -r /content/autoresearch-medimage-colab/logs/. "$DRIVE_ROOT/logs/" || true
 ```
 
