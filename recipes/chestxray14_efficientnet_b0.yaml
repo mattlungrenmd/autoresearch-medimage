@@ -1,8 +1,8 @@
-# ChestX-ray14 search candidate - ResNet-50 backbone
-# T4-friendly recipe for recipe-space autoresearch sessions
+# ChestX-ray14 search candidate - EfficientNet-B0 backbone
+# Small, fast backbone intended for Colab recipe-space sweeps
 
 paper:
-  title: "ChestX-ray14 search candidate: ResNet-50"
+  title: "ChestXray14 search candidate: EfficientNet-B0"
   dataset: "NIH ChestX-ray14"
   reported_metric: "Recipe-space search candidate"
 
@@ -10,12 +10,12 @@ dataset: chestxray14
 task: multilabel
 
 model:
-  backbone: resnet50
+  backbone: efficientnet_b0
   pretrained: true
   dropout: 0.3
 
 training:
-  batch_size: 24
+  batch_size: 32
   optimizer: adamw
   learning_rate: 0.0003
   weight_decay: 0.01
@@ -36,6 +36,6 @@ augmentation:
   color_jitter_contrast: 0.15
 
 notes: |
-  A strong CNN baseline for Colab search sessions. ResNet-50 is lighter than
-  larger DenseNet variants while still providing a meaningful architecture
-  change from the canonical CheXNet DenseNet-121 baseline.
+  EfficientNet-B0 trades some capacity for throughput, which makes it useful
+  for Colab experiments where the practical goal is more completed search runs
+  per session rather than maximum single-model capacity.

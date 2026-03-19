@@ -26,7 +26,7 @@ from tools.progress_plot import choose_dataset, choose_metric_name, choose_sessi
 
 RESULTS_FILE = REPO_DIR / "results.tsv"
 BENCHMARK_FILES = {
-    "chestxray14": REPO_DIR / "benchmarks" / "chestxray14.md",
+    "chestxray14": REPO_DIR / "examples" / "chestxray14" / "benchmark.md",
     "aptos": REPO_DIR / "benchmarks" / "diabetic_retinopathy.md",
     "brain_mri": REPO_DIR / "benchmarks" / "segmentation.md",
     "retina_vessel": REPO_DIR / "benchmarks" / "segmentation.md",

@@ -59,8 +59,14 @@ uv run python tools/run_search_session.py `
   --session $env:SESSION
 ```
 
-That mode still uses `train.py` for every scored run, but it writes generated
-overlay recipes plus lineage/search state under `logs/<session>/search/`.
+That mode still uses `train.py` for every scored run. The outer loop adds:
+
+- branch-aware parent selection so one early winner does not dominate too soon
+- one-family-at-a-time mutations across backbones, loss, optimization,
+  augmentation, image size, and regularization
+- confirmation reruns for borderline gains
+- search state, lineage, and generated overlay recipes under
+  `logs/<session>/search/`
 
 ## Optional Staged Pattern
 
@@ -181,9 +187,8 @@ uv run python tools/run_recipe_queue.py `
 
 The preset mixes existing DenseNet anchors with new architecture-first recipes:
 
-- `chexnet`
-- `chexnet_improved`
-- `chexnet_advanced`
+- `chestxray14_baseline`
+- `chestxray14_advanced`
 - `chestxray14_frontier_densenet121`
 - `chestxray14_frontier_densenet169`
 - `chestxray14_frontier_resnet50`

@@ -57,11 +57,11 @@ paper artifacts from the final checkpoint with `tools/finalize_run.py`.
 
 ### Commands
 
-Built-in hello-world:
+Built-in ChestXray14 example:
 
 ```bash
 uv run prepare.py --dataset chestxray14
-uv run train.py --recipe chexnet --save-checkpoint
+uv run train.py --recipe chestxray14_baseline --save-checkpoint
 ```
 
 Custom dataset:
@@ -86,8 +86,8 @@ uv run train.py --recipe toy_binary_smoke --time-budget 5
 
 ### Overnight Runbook
 
-See [docs/OVERNIGHT_CHEXNET_RUN.md](docs/OVERNIGHT_CHEXNET_RUN.md) for the
-complete overnight search session runbook with kickoff prompt.
+See [examples/chestxray14/overnight_run.md](examples/chestxray14/overnight_run.md) for a
+ChestXray14-specific overnight search example with kickoff prompt.
 
 ## Goal
 

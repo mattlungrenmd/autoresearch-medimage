@@ -1,6 +1,8 @@
-# CheXNet Hello World
+# ChestXray14 / CheXNet Hello World
 
-CheXNet is the repo's canonical hello-world example.
+This is a dedicated hello-world walkthrough for ChestXray14 using the
+`chestxray14_baseline` recipe. The legacy `chexnet` recipe name still works as
+an alias.
 
 It is an end-to-end demo that shows the repo can:
 
@@ -14,7 +16,7 @@ It is an end-to-end demo that shows the repo can:
 ## Benchmark Context
 
 If you want the original paper comparison table, see
-[benchmarks/chestxray14.md](../benchmarks/chestxray14.md).
+[benchmark.md](benchmark.md).
 
 That file includes:
 
@@ -29,13 +31,13 @@ If you generate figures from your run artifacts, the most relevant outputs are:
 
 For Colab specifically:
 
-- use `notebooks/colab_chexnet.ipynb` for this single-baseline hello-world
+- use `examples/chestxray14/colab_demo.ipynb` for this single-baseline hello-world
 - use `notebooks/colab_autoresearch.ipynb` for a real multi-experiment Colab
   search session on the same dataset
 
-## Why CheXNet
+## Why This Example
 
-CheXNet is a good hello-world because it is:
+This benchmark is a good hello-world because it is:
 
 - well known in medical imaging
 - multi-label rather than toy single-label classification
@@ -60,13 +62,13 @@ uv run prepare.py --dataset chestxray14 --refresh-splits
 Run the baseline:
 
 ```bash
-uv run train.py --recipe chexnet --save-checkpoint
+uv run train.py --recipe chestxray14_baseline --save-checkpoint
 ```
 
 For a real search session instead of one baseline, use a named session:
 
 ```bash
-uv run train.py --recipe chexnet --session chestxray14_search_20260311 --save-checkpoint
+uv run train.py --recipe chestxray14_baseline --session chestxray14_search_20260311 --save-checkpoint
 ```
 
 Regenerate the end-of-run artifacts, including the held-out `test` evaluation:
@@ -78,7 +80,7 @@ uv run python tools/finalize_run.py --dataset chestxray14
 Generate the paper from the run results and checkpoint data:
 
 ```bash
-uv run paper/generate_paper.py --dataset chestxray14 --output paper/generated/chexnet_hello_world.tex
+uv run paper/generate_paper.py --dataset chestxray14 --output paper/generated/chestxray14_hello_world.tex
 ```
 
 Generate manuscript figures from the run artifacts:

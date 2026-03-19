@@ -1,7 +1,7 @@
 # Colab Overnight Run
 
-This runbook sets up a separate CheXNet overnight lane on Google Colab without
-mixing it into an existing local session.
+This runbook sets up a separate ChestXray14 overnight lane on Google Colab
+without mixing it into an existing local session.
 
 ## Goal
 
@@ -21,7 +21,7 @@ This is meant to complement a local overnight run, not replace it.
 - Keep `prepare.py` fixed during the experiment loop.
 - Treat `train.py` as the experiment mutation surface.
 - Use the default 300-second budget for the research loop.
-- Use a new session tag such as `chexnet_overnight_colab_20260310`.
+- Use a new session tag such as `chestxray14_overnight_colab_20260310`.
 - Do not share `results.tsv` with a local overnight workspace while both are active.
 - Do not use held-out `test` for inner-loop keep/discard decisions.
 
@@ -50,7 +50,7 @@ drive.mount("/content/drive")
 ### 2. Choose a Session Tag
 
 ```python
-SESSION = "chexnet_overnight_colab_20260310"
+SESSION = "chestxray14_overnight_colab_20260310"
 WORKDIR = "/content/autoresearch-medimage-colab"
 DRIVE_ROOT = "/content/drive/MyDrive/autoresearch-medimage-colab"
 ```
@@ -98,7 +98,7 @@ Upload `kaggle.json` to Drive and then copy it into place:
 
 ```bash
 %cd /content/autoresearch-medimage-colab
-!uv run train.py --recipe chexnet --session $SESSION --save-checkpoint > run.log 2>&1
+!uv run train.py --recipe chestxray14_baseline --session $SESSION --save-checkpoint > run.log 2>&1
 !tail -n 120 run.log
 !uv run python tools/mark_result.py --dataset chestxray14 --session $SESSION --status keep --append-note "session baseline"
 ```
@@ -149,8 +149,13 @@ families instead of walking a fixed queue:
   --session $SESSION
 ```
 
-This keeps `train.py` as the execution surface and writes search-sidecar
-artifacts under `logs/<session>/search/`.
+This keeps `train.py` as the execution surface, but adds branch-aware search
+policy on top:
+
+- keep multiple promising backbone lines alive
+- mutate one family at a time across recipe/backbone knobs
+- confirm small gains before promoting them
+- write search-sidecar artifacts under `logs/<session>/search/`
 
 ### 7d. Optional: Stage The Search
 
@@ -249,13 +254,13 @@ If you only want the single best refined candidate instead:
 Use this in a fresh agent session attached to the Colab workspace:
 
 ```text
-Read README.md, docs/OVERNIGHT_CHEXNET_RUN.md, docs/CHEXNET_HELLO_WORLD.md, CLAUDE.md, program.md, prepare.py, train.py, results.tsv, and run.log if present.
+Read README.md, examples/chestxray14/overnight_run.md, examples/chestxray14/README.md, CLAUDE.md, program.md, prepare.py, train.py, results.tsv, and run.log if present.
 
 We are running a separate Colab overnight session on chestxray14.
 
 Session setup:
 - dataset: chestxray14
-- session tag: chexnet_overnight_colab_20260310
+- session tag: chestxray14_overnight_colab_20260310
 - selection metric: validation mean_auc
 - the first completed experiment in this session is the session baseline
 - held-out test is reserved for finalization only
@@ -263,7 +268,7 @@ Session setup:
 Hard rules:
 - Do not modify prepare.py.
 - Only modify train.py during the experiment loop.
-- Pass --session chexnet_overnight_colab_20260310 on every training run.
+- Pass --session chestxray14_overnight_colab_20260310 on every training run.
 - Use the default 300-second training budget per run.
 - After each run, inspect run.log and results.tsv.
 - Mark every completed experiment as keep or discard with tools/mark_result.py using the same session tag.
@@ -273,7 +278,7 @@ Hard rules:
 Stop condition:
 - Run 50 completed experiments after the session baseline.
 
-Begin by reconstructing the current state of session chexnet_overnight_colab_20260310 from results.tsv and checkpoints, then continue from the safest recoverable point.
+Begin by reconstructing the current state of session chestxray14_overnight_colab_20260310 from results.tsv and checkpoints, then continue from the safest recoverable point.
 ```
 
 Replace the session tag in the prompt if you launch on a different date.

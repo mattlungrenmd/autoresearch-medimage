@@ -1,8 +1,9 @@
-# Overnight CheXNet Run
+# Overnight ChestXray14 Example
 
 This is the runbook for an overnight search session. The agent runs fast,
 fixed-budget experiments to find the best model backbone and hyperparameters
-for CheXNet. The winning configuration then informs a full-scale training run.
+for the ChestXray14 benchmark. The winning configuration then informs a
+full-scale training run.
 
 If you want the Colab-friendly version of this idea, use
 `notebooks/colab_autoresearch.ipynb`. That notebook runs a named multi-run
@@ -24,7 +25,7 @@ with:
 
 - `data/chestxray14/` is already prepared
 - `data/chestxray14/splits.csv` contains `train`, `val`, and `test`
-- the workspace has a clean session tag ready (for example `chexnet_overnight_20260310`)
+- the workspace has a clean session tag ready (for example `chestxray14_overnight_20260310`)
 - `prepare.py` stays fixed during the run
 - `train.py` is the only experiment surface
 
@@ -44,8 +45,8 @@ Instead:
 Example:
 
 ```bash
-uv run train.py --recipe chexnet --session chexnet_overnight_20260310 --save-checkpoint > run.log 2>&1
-uv run python tools/mark_result.py --dataset chestxray14 --session chexnet_overnight_20260310 --status keep --append-note "session baseline"
+uv run train.py --recipe chestxray14_baseline --session chestxray14_overnight_20260310 --save-checkpoint > run.log 2>&1
+uv run python tools/mark_result.py --dataset chestxray14 --session chestxray14_overnight_20260310 --status keep --append-note "session baseline"
 ```
 
 The recommended evaluation protocol is:
@@ -57,13 +58,13 @@ The recommended evaluation protocol is:
 Use this as the starting prompt for Claude or Codex:
 
 ```text
-Read README.md, CLAUDE.md, prepare.py, train.py, program.md, docs/CHEXNET_HELLO_WORLD.md, and results.tsv.
+Read README.md, CLAUDE.md, prepare.py, train.py, program.md, examples/chestxray14/README.md, and results.tsv.
 
 We are running an overnight Karpathy-style autoresearch session on chestxray14 in this isolated workspace.
 
 Session setup:
 - dataset: chestxray14
-- session tag: chexnet_overnight_20260310
+- session tag: chestxray14_overnight_20260310
 - selection metric: validation mean_auc
 - the first completed experiment in this session becomes the session baseline
 - held-out test is reserved for end-of-run evaluation only
@@ -74,7 +75,7 @@ Improve the kept chestxray14 validation mean_auc over an overnight run on the lo
 Hard rules:
 - Do not modify prepare.py.
 - Only modify train.py during the search phase.
-- Pass --session chexnet_overnight_20260310 on every training run.
+- Pass --session chestxray14_overnight_20260310 on every training run.
 - Do not use the held-out test split to rank experiments.
 - Do not use literature numbers for keep/discard decisions.
 - Use validation mean_auc only for keep/discard decisions during the loop.
@@ -109,7 +110,7 @@ Progress behavior:
   - what changed in train.py
 
 End-of-run steps:
-- Run tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chexnet_overnight_20260310 --output progress.png
+- Run tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chestxray14_overnight_20260310 --output progress.png
 - Evaluate the best kept checkpoint on held-out test
 - Optionally run tools/finalize_run.py if you also want the experimental paper/helper outputs
 - Summarize:
@@ -134,9 +135,9 @@ Important:
 The core rhythm is:
 
 ```bash
-uv run train.py --session chexnet_overnight_20260310 > run.log 2>&1
-uv run python tools/mark_result.py --dataset chestxray14 --session chexnet_overnight_20260310 --status keep
-uv run python tools/mark_result.py --dataset chestxray14 --session chexnet_overnight_20260310 --status discard
+uv run train.py --session chestxray14_overnight_20260310 > run.log 2>&1
+uv run python tools/mark_result.py --dataset chestxray14 --session chestxray14_overnight_20260310 --status keep
+uv run python tools/mark_result.py --dataset chestxray14 --session chestxray14_overnight_20260310 --status discard
 ```
 
 Which status to use depends on whether the latest run improved on the current
@@ -147,14 +148,14 @@ best validation result from the same session.
 Refresh the core end-of-run artifacts:
 
 ```bash
-uv run python tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chexnet_overnight_20260310 --output progress.png
+uv run python tools/progress_plot.py --results results.tsv --dataset chestxray14 --session chestxray14_overnight_20260310 --output progress.png
 uv run python tools/evaluate_checkpoint.py --checkpoint <best_checkpoint_path> --split test --output paper/generated/chestxray14_final_eval.pt
 ```
 
 If you also want the experimental helper outputs, run:
 
 ```bash
-uv run python tools/finalize_run.py --dataset chestxray14 --session chexnet_overnight_20260310 --compile-paper
+uv run python tools/finalize_run.py --dataset chestxray14 --session chestxray14_overnight_20260310 --compile-paper
 ```
 
 If `pdflatex` is not available, the paper helper will leave the `.tex` file in

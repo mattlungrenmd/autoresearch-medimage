@@ -38,5 +38,5 @@ augmentation:
 notes: |
   The chest X-ray pneumonia dataset has significant class imbalance
   (more pneumonia than normal). Class-weighted loss is essential.
-  DenseNet-121 (same architecture as CheXNet) works well as baseline.
+  DenseNet-121 works well as a strong chest X-ray baseline.
   Key improvements: focal loss, CLAHE preprocessing, larger resolution.

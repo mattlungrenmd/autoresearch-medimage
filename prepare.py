@@ -10,7 +10,7 @@ This file is READ-ONLY for agents during experiments. Do not modify.
 Usage:
     # Built-in datasets (Kaggle download)
     python prepare.py --dataset aptos            # Diabetic Retinopathy grading
-    python prepare.py --dataset chestxray14      # CheXNet multi-label (14 pathologies)
+    python prepare.py --dataset chestxray14      # ChestXray14 multi-label (14 pathologies)
     python prepare.py --dataset brain_mri        # Brain MRI segmentation
     python prepare.py --dataset all              # Download all 7 datasets
     python prepare.py --list                     # List all available datasets
@@ -128,7 +128,7 @@ DATASETS = {
         "mean": (0.485,),
         "std": (0.229,),
         "metric": "mean_auc",
-        "description": "NIH ChestX-ray14 - 14 thoracic pathology multi-label classification (CheXNet baseline)",
+        "description": "NIH ChestX-ray14 - 14 thoracic pathology multi-label classification",
     },
     "chest_xray": {
         "kaggle_slug": "paultimothymooney/chest-xray-pneumonia",
@@ -1454,7 +1454,7 @@ def evaluate_classification(model, dataset_name, batch_size, device="cuda"):
 @torch.no_grad()
 def evaluate_multilabel(model, dataset_name, batch_size, device="cuda"):
     """
-    Evaluate multi-label classification (e.g., CheXNet/ChestX-ray14).
+    Evaluate multi-label classification (for example ChestX-ray14).
 
     Returns dict with:
         mean_auc (float): Mean AUC across all pathologies (0-100)

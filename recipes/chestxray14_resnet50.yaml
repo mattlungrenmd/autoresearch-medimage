@@ -1,8 +1,8 @@
-# ChestX-ray14 search candidate - ConvNeXt Tiny backbone
-# Modern convolutional baseline for recipe-space autoresearch
+# ChestX-ray14 search candidate - ResNet-50 backbone
+# T4-friendly recipe for recipe-space autoresearch sessions
 
 paper:
-  title: "ChestX-ray14 search candidate: ConvNeXt Tiny"
+  title: "ChestXray14 search candidate: ResNet-50"
   dataset: "NIH ChestX-ray14"
   reported_metric: "Recipe-space search candidate"
 
@@ -10,14 +10,14 @@ dataset: chestxray14
 task: multilabel
 
 model:
-  backbone: convnext_tiny
+  backbone: resnet50
   pretrained: true
-  dropout: 0.2
+  dropout: 0.3
 
 training:
-  batch_size: 16
+  batch_size: 24
   optimizer: adamw
-  learning_rate: 0.0001
+  learning_rate: 0.0003
   weight_decay: 0.01
   warmup_ratio: 0.05
   warmdown_ratio: 0.3
@@ -36,6 +36,6 @@ augmentation:
   color_jitter_contrast: 0.15
 
 notes: |
-  ConvNeXt Tiny gives the Colab search notebook a modern convolutional option
-  that is still T4-friendly. It is slower than EfficientNet-B0 but often a
-  stronger backbone family to test in a short fixed-budget session.
+  A strong CNN baseline for Colab search sessions. ResNet-50 is lighter than
+  larger DenseNet variants while still providing a meaningful architecture
+  change from the ChestXray14 DenseNet-121 reference baseline.

@@ -1,9 +1,9 @@
-# CheXNet Advanced — Full pipeline with EMA, gradual unfreezing, discriminative LR
-# Builds on chexnet_improved with additional training tricks
+# ChestXray14 advanced DenseNet-121 recipe
+# Builds on the baseline reference recipe with additional training tricks
 # Target: Mean AUC > 85%
 
 paper:
-  title: "CheXNet with Advanced Training Techniques"
+  title: "ChestXray14 advanced DenseNet-121"
   dataset: "NIH ChestX-ray14"
   reported_metric: "Mean AUC target > 85%"
 
@@ -45,7 +45,7 @@ advanced:
   backbone_lr_factor: 0.1
 
 notes: |
-  Advanced recipe combining all improvements:
+  Advanced ChestXray14 recipe combining several DenseNet-121 improvements:
   1. Focal loss + AdamW + color jitter (from reproduction study)
   2. EMA for smoother model weights
   3. Gradual unfreezing: train head first, then unfreeze backbone

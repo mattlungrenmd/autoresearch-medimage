@@ -1,11 +1,11 @@
-# CheXNet with BiomedCLIP backbone — Microsoft's medical foundation model
+# ChestXray14 with BiomedCLIP backbone
 # BiomedCLIP pretrained on PMC-15M (PubMed Central image-text pairs)
 #
 # Expected: Mean AUC improvement over ImageNet-pretrained DenseNet-121
 # due to domain-specific pretraining on medical literature
 
 paper:
-  title: "CheXNet with BiomedCLIP backbone"
+  title: "ChestXray14 with BiomedCLIP backbone"
   dataset: "NIH ChestX-ray14"
   reported_metric: "Mean AUC ~86-88% (expected with medical pretraining)"
 

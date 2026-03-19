@@ -49,18 +49,18 @@ Or use the manual contract:
 
 See [docs/BRING_YOUR_OWN_DATA.md](docs/BRING_YOUR_OWN_DATA.md) for the schema.
 
-## Quick Start: Built-In Demo (CheXNet)
+## Quick Start: Built-In Benchmark Demo (ChestXray14)
 
 ```bash
 uv run prepare.py --dataset chestxray14
-uv run train.py --recipe chexnet --save-checkpoint
+uv run train.py --recipe chestxray14_baseline --save-checkpoint
 uv run python tools/progress_plot.py --dataset chestxray14 --output progress.png
 uv run python tools/finalize_run.py --dataset chestxray14
 ```
 
-See [docs/CHEXNET_HELLO_WORLD.md](docs/CHEXNET_HELLO_WORLD.md) for the
-end-to-end walkthrough and the benchmark context against the original CheXNet
-paper tables.
+See [examples/chestxray14/README.md](examples/chestxray14/README.md) for the
+end-to-end ChestXray14 walkthrough and the benchmark context against the
+original paper tables.
 
 ## Google Colab
 
@@ -68,15 +68,15 @@ You can use the public notebooks on a free T4 GPU with no local install.
 
 - Quick start:
   [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
-- CheXNet hello-world:
-  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_chexnet.ipynb)
+- Single benchmark demo:
+  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb)
 - Multi-run ChestXray14 search:
   [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb)
 
 Notebook files in the repo:
 
 - [notebooks/colab_quickstart.ipynb](notebooks/colab_quickstart.ipynb)
-- [notebooks/colab_chexnet.ipynb](notebooks/colab_chexnet.ipynb)
+- [examples/chestxray14/colab_demo.ipynb](examples/chestxray14/colab_demo.ipynb)
 - [notebooks/colab_autoresearch.ipynb](notebooks/colab_autoresearch.ipynb)
 
 For the full runbook versions, see [docs/GPU_SETUP.md](docs/GPU_SETUP.md) and
@@ -89,25 +89,43 @@ uv run prepare.py --dataset toy_binary
 uv run train.py --recipe toy_binary_smoke --time-budget 5
 ```
 
-## Built-In Datasets
+## Dataset Prep Wiring
 
-These are built-in presets in `prepare.py`, so you can run them without
-creating your own `data/<dataset>/dataset.yaml` first.
+`prepare.py` includes wiring for a handful of public medical-imaging datasets,
+including Kaggle-hosted mirrors, but the repo does not try to choose the
+benchmark for you.
 
-| Dataset | Task | Metric | Source |
-|---------|------|--------|--------|
-| `chestxray14` | Multi-label (14 pathologies) | Mean AUC | NIH ChestX-ray14 |
-| `aptos` | Classification (5 grades) | Quadratic Kappa | APTOS 2019 |
-| `oct` | Classification (4 classes) | Accuracy | Kermany OCT |
-| `chest_xray` | Binary classification | AUC | Chest X-ray Pneumonia |
-| `brain_mri` | Segmentation | Dice | LGG MRI |
-| `retina_vessel` | Segmentation | Dice | Retinal Blood Vessel |
-| `pneumothorax` | Segmentation | Dice | SIIM-ACR |
+Use the built-in wiring when it matches your problem, or point the repo at your
+own local dataset with `--data`.
 
 ```bash
 uv run prepare.py --list
 uv run train.py --list-recipes
 ```
+
+## What Changed From `autoresearch`
+
+This repo stays close to the small-contract spirit of
+[Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch), but it
+adapts that workflow to medical imaging.
+
+What stayed the same:
+
+- `prepare.py` stays fixed during experiment loops
+- `train.py` remains the main experiment surface
+- short runs are compared under a fixed wall-clock budget
+- `results.tsv` is still the experiment ledger
+
+What changed for medical imaging:
+
+- the objective is task-specific (`mean_auc`, Dice, QWK, accuracy), not bits per
+  byte
+- the dataset contract has to handle labeled image folders, splits, masks, and
+  Kaggle-style prep flows
+- recipes need to span very different backbone families and image sizes under
+  the same time budget
+- the repo ships optional outer-loop helpers for branch management, refinement,
+  and longer validation because slower image models can rerank later
 
 ## Optional Adaptive Search
 
@@ -122,7 +140,17 @@ uv run python tools/run_search_session.py \
   --session chestxray14_stage1
 ```
 
-This mode still scores every experiment through `train.py`, but it also writes:
+This mode still scores every experiment through `train.py`. The outer loop
+mainly adds search policy around that fixed inner loop:
+
+- seed from a search space or prior winner sessions
+- keep multiple promising branches alive instead of tunneling on one recipe
+- mutate one family at a time across backbones, loss, optimization,
+  augmentation, image size, and regularization
+- confirm borderline gains before treating them as real improvements
+- save lineage, generated overlay recipes, and session state for later review
+
+It writes:
 
 - generated overlay recipes under `logs/<session>/search/recipes/`
 - search state and lineage under `logs/<session>/search/`
@@ -183,7 +211,7 @@ uv run python tools/run_full_train.py \
 See [docs/LOCAL_OVERNIGHT_RUN.md](docs/LOCAL_OVERNIGHT_RUN.md) and
 [docs/COLAB_OVERNIGHT_RUN.md](docs/COLAB_OVERNIGHT_RUN.md) for the longer-form
 runbooks. A separate ChestXray14 case study lives in
-[docs/MEDICAL_IMAGING_AUTORESEARCH.md](docs/MEDICAL_IMAGING_AUTORESEARCH.md).
+[examples/chestxray14/case_study.md](examples/chestxray14/case_study.md).
 
 ## Repo Layout
 
@@ -193,7 +221,8 @@ runbooks. A separate ChestXray14 case study lives in
 - `data/`: built-in demos plus custom local datasets
 - `recipes/`: reproducible recipe files and baselines
 - `search_spaces/`: optional adaptive-search search spaces
-- `benchmarks/`: benchmark tables, including CheXNet paper comparisons
+- `benchmarks/`: benchmark tables and reference comparisons
+- `examples/`: contained benchmark-specific example assets
 - `docs/`: bring-your-own-data, GPU setup, and walkthrough docs
 - `notebooks/`: Colab entry points
 - `tools/`: progress plots, finalize helpers, and search utilities
@@ -212,8 +241,8 @@ Search-time selection should happen on `val`. Use held-out `test` only for the
 final report of the winning checkpoint or finalists.
 
 See [program.md](program.md) for the full agent workflow and
-[docs/OVERNIGHT_CHEXNET_RUN.md](docs/OVERNIGHT_CHEXNET_RUN.md) for the
-CheXNet-style overnight runbook.
+[examples/chestxray14/overnight_run.md](examples/chestxray14/overnight_run.md) for a
+ChestXray14-specific overnight example runbook.
 
 ## Roadmap
 

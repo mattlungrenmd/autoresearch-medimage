@@ -55,4 +55,4 @@ During the search phase:
 
 - do not claim MONAI, 2.5D, 3D, DICOM-series, or volumetric support as current
 - do not treat the generated paper as submission-ready without human revision
-- keep CheXNet as the hello-world demo, paired with the bring-your-own-data story
+- keep benchmark demos secondary to the bring-your-own-data story

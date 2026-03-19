@@ -6,7 +6,7 @@
 - **GPU**: T4 (16GB VRAM) - free, limited hours
 - **Notebook options**:
   - [Quick start](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb) for smoke tests and BYOD
-  - [CheXNet baseline](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_chexnet.ipynb) for one ChestX-ray14 run
+  - [Single benchmark demo](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb) for one ChestXray14 run
   - [Autoresearch session](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb) for a named multi-run search
 - **Setup**:
 ```python
@@ -41,7 +41,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 %cd autoresearch-medimage
 !pip install -e .
 # Kaggle datasets are pre-mounted at /kaggle/input/
-!python train.py --recipe chexnet --save-checkpoint
+!python train.py --recipe chestxray14_baseline --save-checkpoint
 ```
 - **Advantage**: Kaggle datasets load instantly (no download needed)
 

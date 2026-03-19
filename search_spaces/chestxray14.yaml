@@ -4,13 +4,11 @@ primary_metric: mean_auc
 default_max_runs: 24
 
 seed_recipes:
-  - chexnet_improved
-  - chestxray14_frontier_densenet169_stronger_color
-  - chestxray14_frontier_resnet50
-  - chestxray14_frontier_convnext_tiny_stronger_color
-  - chestxray14_frontier_efficientnet_b0_stronger_color
-  - chestxray14_frontier_efficientnet_b0_bce_mild_tta
-  - chestxray14_frontier_efficientnet_b1_stronger_color
+  - chestxray14_baseline
+  - chestxray14_advanced
+  - chestxray14_resnet50
+  - chestxray14_convnext_tiny
+  - chestxray14_efficientnet_b0
 
 backbone_pool:
   - densenet121

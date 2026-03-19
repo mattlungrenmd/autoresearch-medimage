@@ -8,13 +8,13 @@ This is the experiment surface for the Karpathy-style inner loop:
 - keep or discard externally after reading the run metric
 
 Usage:
-    uv run train.py                                    # CheXNet on ChestX-ray14 (default)
-    uv run train.py --recipe chexnet                   # Load recipe config
+    uv run train.py                                    # ChestXray14 baseline (default)
+    uv run train.py --recipe chestxray14_baseline      # Load recipe config
     uv run train.py --recipe-file logs/run/cand.yaml   # Load a session-local overlay recipe
     uv run train.py --recipe aptos_winner              # Kaggle-winning DR approach
     uv run train.py --dataset aptos                    # DR grading (manual config)
     uv run train.py --dataset brain_mri                # Brain tumor segmentation
-    uv run train.py --recipe chexnet --epochs 10       # Optional full-train mode
+    uv run train.py --recipe chestxray14_baseline --epochs 10  # Optional full-train mode
     uv run train.py --save-checkpoint                  # Save best model
 """
 
@@ -58,6 +58,19 @@ from prepare import (
 # Recipe loader — load configs from recipes/*.yaml
 # ---------------------------------------------------------------------------
 
+RECIPE_ALIASES = {
+    "chexnet": "chestxray14_baseline",
+    "chexnet_advanced": "chestxray14_advanced",
+    "chexnet_biomedclip": "chestxray14_biomedclip",
+    "chexnet_resnet50": "chestxray14_resnet50",
+    "chexnet_convnext_tiny": "chestxray14_convnext_tiny",
+    "chexnet_efficientnet_b0": "chestxray14_efficientnet_b0",
+}
+
+
+def resolve_recipe_name(recipe_name):
+    return RECIPE_ALIASES.get(recipe_name, recipe_name)
+
 def load_recipe_file(recipe_path):
     """Load a recipe YAML file and return config dict."""
     try:
@@ -78,7 +91,8 @@ def load_recipe_file(recipe_path):
 def load_recipe(recipe_name):
     """Load a recipe YAML file from recipes/ and return config dict."""
     recipe_dir = Path(__file__).parent / "recipes"
-    recipe_path = recipe_dir / f"{recipe_name}.yaml"
+    resolved_name = resolve_recipe_name(recipe_name)
+    recipe_path = recipe_dir / f"{resolved_name}.yaml"
 
     if not recipe_path.exists():
         available = [f.stem for f in recipe_dir.glob("*.yaml")]
@@ -214,16 +228,16 @@ def apply_recipe(recipe):
 # Hyperparameters (edit these directly, no CLI flags needed)
 # ---------------------------------------------------------------------------
 
-# Task selection — default: CheXNet reproduction
+# Task selection — default: ChestXray14 multilabel baseline
 DATASET = "chestxray14"       # "chestxray14", "aptos", "oct", "chest_xray", "brain_mri", etc.
 
 # Model architecture
-BACKBONE = "densenet121"      # CheXNet uses DenseNet-121
+BACKBONE = "densenet121"      # Default ChestXray14 baseline backbone
 PRETRAINED = True             # ImageNet pretrained (critical for medical imaging)
 DROPOUT = 0.2                 # dropout before final classifier
 
-# Optimization — CheXNet paper settings
-BATCH_SIZE = 16               # CheXNet used 16
+# Optimization — default ChestXray14 baseline settings
+BATCH_SIZE = 16               # conservative baseline batch size
 LEARNING_RATE = 0.001         # Adam LR
 OPTIMIZER = "adam"            # "adam", "adamw", "sgd"
 WEIGHT_DECAY = 1e-4           # L2 regularization
@@ -416,7 +430,7 @@ def current_results_metadata(cfg, loss_type, batch_size=None):
     }
 
 # ---------------------------------------------------------------------------
-# Classification Model: CheXNet-style (DenseNet-121 + pretrained)
+# Classification Model: pretrained backbone + lightweight classification head
 # ---------------------------------------------------------------------------
 
 class HuggingFaceVisionEncoder(nn.Module):
@@ -474,7 +488,7 @@ class HuggingFaceVisionEncoder(nn.Module):
 
 class MedicalClassifier(nn.Module):
     """Pretrained backbone + classification head.
-    Default: DenseNet-121 (CheXNet architecture).
+    Default: DenseNet-121 baseline for ChestXray14.
     Supports any torchvision or timm model: densenet*, resnet*, efficientnet*, convnext*, vit_*, etc.
     Also supports HuggingFace models with "hf:" prefix (e.g., "hf:microsoft/BiomedCLIP-*").
     See FOUNDATION_MODELS.md for medical-specific backbone recommendations.
@@ -1552,13 +1566,25 @@ def list_recipes():
     print("\nAvailable recipes:\n")
     for recipe_file in sorted(recipe_dir.glob("*.yaml")):
         desc = ""
-        with open(recipe_file, "r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if line.startswith("#") and not desc:
-                    desc = line.lstrip("# ").strip()
-                    break
+        try:
+            recipe = load_recipe_file(recipe_file)
+        except Exception:
+            recipe = {}
+        paper = recipe.get("paper", {}) if isinstance(recipe, dict) else {}
+        if isinstance(paper, dict):
+            desc = str(paper.get("title", "")).strip()
+        if not desc:
+            with open(recipe_file, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if line.startswith("#") and not desc:
+                        desc = line.lstrip("# ").strip()
+                        break
         print(f"  {recipe_file.stem:<28s} {desc}")
+    if RECIPE_ALIASES:
+        print("\nLegacy aliases:\n")
+        for alias, canonical in sorted(RECIPE_ALIASES.items()):
+            print(f"  {alias:<28s} -> {canonical}")
     print("\nUsage: uv run train.py --recipe <name>")
 
 
@@ -1583,7 +1609,7 @@ def main():
         "--recipe",
         type=str,
         default=None,
-        help="Load a recipe from recipes/ (for example: chexnet, aptos_winner)",
+        help="Load a recipe from recipes/ (for example: chestxray14_baseline, aptos_winner)",
     )
     parser.add_argument(
         "--recipe-file",
@@ -1637,8 +1663,9 @@ def main():
     run_recipe_name = ""
     if args.recipe:
         recipe = load_recipe(args.recipe)
-        recipe_source = str((Path(__file__).parent / "recipes" / f"{args.recipe}.yaml").resolve())
-        run_recipe_name = args.recipe
+        resolved_name = resolve_recipe_name(args.recipe)
+        recipe_source = str((Path(__file__).parent / "recipes" / f"{resolved_name}.yaml").resolve())
+        run_recipe_name = resolved_name
     elif args.recipe_file:
         recipe_path = Path(args.recipe_file).expanduser().resolve()
         recipe = load_recipe_file(recipe_path)

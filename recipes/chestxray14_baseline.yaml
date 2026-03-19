@@ -1,11 +1,11 @@
-# CheXNet: Radiologist-Level Pneumonia Detection on Chest X-Rays with Deep Learning
+# ChestXray14 baseline reference recipe
 # Rajpurkar et al., 2017 — https://arxiv.org/abs/1711.05225
 #
 # Original results: Mean AUC 84.1% across 14 pathologies on ChestX-ray14
 # Reproduction target: Mean AUC ~84-85%
 
 paper:
-  title: "CheXNet: Radiologist-Level Pneumonia Detection on Chest X-Rays with Deep Learning"
+  title: "ChestXray14 baseline (DenseNet-121)"
   authors: "Rajpurkar, Irvin, Zhu, et al."
   year: 2017
   arxiv: "1711.05225"
@@ -39,7 +39,8 @@ augmentation:
   color_jitter: false
 
 notes: |
-  The original CheXNet paper used DenseNet-121 pretrained on ImageNet with a
+  This reference recipe follows the original DenseNet-121 ChestXray14 setup
+  on ChestXray14. The original paper used DenseNet-121 pretrained on ImageNet with a
   single fully-connected layer outputting 14 sigmoid probabilities. Training used
   Adam optimizer. The model was trained on the official train split and evaluated
   on the official test split of ChestX-ray14 (112,120 frontal-view X-rays from

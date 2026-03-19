@@ -1,5 +1,5 @@
 # Knowledge distillation example — distill a large teacher into a compact student.
-# First train the teacher: uv run train.py --recipe chexnet_advanced --save-checkpoint
+# First train the teacher: uv run train.py --recipe chestxray14_advanced --save-checkpoint
 # Then run this recipe pointing to the teacher checkpoint.
 
 dataset: chestxray14
@@ -33,5 +33,5 @@ advanced:
   compute_ci: true
 
 paper:
-  title: "Knowledge Distillation for CheXNet"
+  title: "Knowledge Distillation for ChestXray14"
   description: "Distill DenseNet-121 teacher into EfficientNet-B0 student"

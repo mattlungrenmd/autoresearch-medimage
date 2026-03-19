@@ -41,7 +41,7 @@
 
 ## autoresearch-medimage Results
 
-*Run `uv run train.py --recipe chexnet --save-checkpoint` to add your results here.*
+*Run `uv run train.py --recipe chestxray14_baseline --save-checkpoint` to add your results here.*
 
 | Commit | Mean AUC | Backbone | Recipe | Memory (GB) | Notes |
 |--------|----------|----------|--------|-------------|-------|

@@ -27,6 +27,9 @@ import torch
 PAPER_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FILE = os.path.join(os.path.dirname(PAPER_DIR), "results.tsv")
 BENCHMARK_DIR = os.path.join(os.path.dirname(PAPER_DIR), "benchmarks")
+EXAMPLE_BENCHMARK_FILES = {
+    "chestxray14": os.path.join(os.path.dirname(PAPER_DIR), "examples", "chestxray14", "benchmark.md"),
+}
 
 
 def escape_latex(text):
@@ -105,7 +108,7 @@ def format_metric(metric_name, metric_value):
 
 def parse_published_benchmarks(dataset_name):
     """Parse published results from benchmarks/*.md files."""
-    benchmark_path = os.path.join(BENCHMARK_DIR, f"{dataset_name}.md")
+    benchmark_path = EXAMPLE_BENCHMARK_FILES.get(dataset_name, os.path.join(BENCHMARK_DIR, f"{dataset_name}.md"))
     if not os.path.exists(benchmark_path):
         return []
     text = Path(benchmark_path).read_text(encoding="utf-8")
