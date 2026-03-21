@@ -77,7 +77,7 @@ class SearchReportTests(unittest.TestCase):
                         "",
                         "adaevolve_lite",
                         "seed",
-                        "chexnet_improved",
+                        "chestxray14_advanced",
                         "cand0001",
                         "",
                     ]

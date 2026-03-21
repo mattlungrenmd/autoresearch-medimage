@@ -80,7 +80,7 @@ class TrainResultsHeaderTests(unittest.TestCase):
                 "parent_id": "cand0003",
                 "search_algo": "adaevolve_lite",
                 "mutation_op": "lr_wd",
-                "base_recipe": "chexnet_improved",
+                "base_recipe": "chestxray14_advanced",
                 "replicate_group": "cand0007",
                 "failure_reason": "",
             }

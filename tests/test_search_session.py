@@ -58,7 +58,7 @@ class SearchSessionTests(unittest.TestCase):
     def test_build_recipe_stem_stays_compact_for_long_candidate_names(self):
         stem = rss.build_recipe_stem(
             "cand0020",
-            "cand0019_cand0016_cand0007_cand0005_chestxray14_frontier_efficientnet_b0_stronger_color_loss_augmentation_regularization",
+            "cand0019_cand0016_cand0007_cand0005_chestxray14_frontier_efficientnet_b0_loss_augmentation_regularization",
             "confirm",
         )
         self.assertTrue(stem.startswith("cand0020_"))
@@ -177,7 +177,7 @@ class SearchSessionTests(unittest.TestCase):
                     {
                         "session": "older_session",
                         "dataset": "chestxray14",
-                        "recipe": "chexnet_improved",
+                        "recipe": "chestxray14_advanced",
                         "backbone": "densenet121",
                         "metric_name": "mean_auc",
                         "metric": "90.0",

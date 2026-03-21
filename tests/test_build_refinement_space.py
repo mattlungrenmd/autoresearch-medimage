@@ -21,7 +21,7 @@ class BuildRefinementSpaceTests(unittest.TestCase):
                     {
                         "dataset": "chestxray14",
                         "task": "multilabel",
-                        "seed_recipes": ["chexnet_improved"],
+                        "seed_recipes": ["chestxray14_advanced"],
                         "backbone_pool": ["efficientnet_b0", "densenet169"],
                         "mutation_families": ["loss", "lr_wd"],
                     },
@@ -112,7 +112,7 @@ class BuildRefinementSpaceTests(unittest.TestCase):
                     {
                         "dataset": "chestxray14",
                         "task": "multilabel",
-                        "seed_recipes": ["chexnet_improved"],
+                        "seed_recipes": ["chestxray14_advanced"],
                         "backbone_pool": ["efficientnet_b0", "densenet169", "resnet50"],
                         "mutation_families": ["backbone_swap", "loss", "lr_wd"],
                         "phase_families": {
