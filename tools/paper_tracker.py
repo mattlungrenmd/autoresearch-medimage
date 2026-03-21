@@ -33,16 +33,16 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 MEDICAL_IMAGING_QUERIES = [
     "medical image segmentation",
     "medical image classification",
-    "chest x-ray deep learning",
-    "retinal image analysis",
-    "diabetic retinopathy detection",
-    "brain tumor segmentation",
+    "medical image foundation model",
     "radiology artificial intelligence",
+    "x-ray image classification",
+    "retinal image analysis",
+    "fundus image analysis",
     "ophthalmology deep learning",
     "pathology image classification",
+    "ultrasound image segmentation",
     "CT scan deep learning",
     "MRI segmentation neural network",
-    "fundus image analysis",
     "dermatology image classification",
 ]
 

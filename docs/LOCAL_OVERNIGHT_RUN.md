@@ -185,7 +185,7 @@ uv run python tools/run_recipe_queue.py `
 
 ## What The Overnight Preset Runs
 
-The preset mixes existing DenseNet anchors with new architecture-first recipes:
+The preset mixes the shipped DenseNet anchors with the frontier backbone sweep:
 
 - `chestxray14_baseline`
 - `chestxray14_advanced`
@@ -195,7 +195,6 @@ The preset mixes existing DenseNet anchors with new architecture-first recipes:
 - `chestxray14_frontier_convnext_tiny`
 - `chestxray14_frontier_efficientnet_b0`
 - `chestxray14_frontier_efficientnet_b1`
-- stronger-color second passes for each of the six frontier backbones
 
 The frontier recipes keep the training setup mostly fixed and only adjust a few
 obvious fit knobs such as batch size so the comparison stays fair on modest

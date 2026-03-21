@@ -125,7 +125,7 @@ Run the queue helper:
   --session $SESSION
 ```
 
-That preset runs:
+That preset runs the shipped frontier recipes:
 
 - `chestxray14_frontier_densenet121`
 - `chestxray14_frontier_densenet169`

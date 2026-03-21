@@ -25,6 +25,8 @@ progress.png
 
 # Kaggle credentials (NEVER commit)
 kaggle.json
+.env
+.env.*
 
 # Medical imaging artifacts
 *.dcm
