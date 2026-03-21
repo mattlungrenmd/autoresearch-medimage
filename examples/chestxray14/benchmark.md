@@ -1,4 +1,9 @@
-# ChestX-ray14 Benchmark — 14-Pathology Classification
+# ChestXray14 Benchmark - 14-Pathology Classification
+
+Important: the mean AUC numbers below refer to the 14-pathology ChestXray14
+classification setting reported in Table 2 of the original CheXNet paper.
+They are not the same evaluation as the paper's separate 420-image pneumonia
+vs. radiologist comparison, which reported F1 on a curated test set.
 
 ## Published Results (Mean AUC %)
 
@@ -39,10 +44,21 @@
 | Pleural Thickening | 80.62 | 68.4 |
 | Hernia | 91.64 | 87.2 |
 
+## Separate CheXNet Radiologist Comparison
+
+The original CheXNet paper also reported a different evaluation:
+
+- task: binary pneumonia detection
+- test set: 420 frontal chest X-rays with four radiologist annotations
+- metric: F1 score against radiologist labels
+- result: CheXNet 0.435 vs radiologist average 0.387
+
+Do not compare that F1 result directly to the mean AUC values above.
+
 ## autoresearch-medimage Results
 
 *Run `uv run train.py --recipe chestxray14_baseline --save-checkpoint` to add your results here.*
 
 | Commit | Mean AUC | Backbone | Recipe | Memory (GB) | Notes |
 |--------|----------|----------|--------|-------------|-------|
-| — | — | — | — | — | *Run your first experiment!* |
+| - | - | - | - | - | *Run your first experiment!* |

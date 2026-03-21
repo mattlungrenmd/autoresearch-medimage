@@ -22,6 +22,8 @@ That file includes:
 
 - the published mean-AUC table
 - the per-pathology CheXNet-vs-Wang breakdown
+- a note separating the 14-label mean-AUC benchmark from the paper's separate
+  420-image pneumonia F1 comparison against radiologists
 - the place where you can record your own repo results
 
 If you generate figures from your run artifacts, the most relevant outputs are:
