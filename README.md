@@ -4,8 +4,8 @@
 [Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch).
 
 It is built for researchers with labeled 2D medical imaging datasets who want
-an agent-first loop for candidate discovery: backbones, losses, augmentations,
-and training settings under a fixed experiment contract.
+fast candidate discovery: backbones, losses, augmentations, and training
+settings under a fixed short-run workflow.
 
 Built by [Matthew Lungren](https://github.com/mattlungrenmd) as a practical
 medical-imaging extension of the `autoresearch` idea.
@@ -108,16 +108,16 @@ uv run train.py --list-recipes
 
 ## What Changed From `autoresearch`
 
-This repo stays close to the small-contract spirit of
+This repo stays close to the minimal design of
 [Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch), but it
 adapts that workflow to medical imaging.
 
 What stayed the same:
 
 - `prepare.py` stays fixed during experiment loops
-- `train.py` remains the main experiment surface
+- `train.py` remains the main training file
 - short runs are compared under a fixed wall-clock budget
-- `results.tsv` is still the experiment ledger
+- `results.tsv` is still the results log
 
 What changed for medical imaging:
 
@@ -219,8 +219,8 @@ runbooks. A separate ChestXray14 case study lives in
 ## Repo Layout
 
 - `prepare.py`: dataset preparation, loaders, and evaluation
-- `train.py`: the experiment surface for the inner loop
-- `program.md`: agent instructions for the search loop
+- `train.py`: the training file used by each run
+- `program.md`: optional prompt/instruction file for Claude or Codex sessions
 - `data/`: built-in demos plus custom local datasets
 - `recipes/`: reproducible recipe files and baselines
 - `search_spaces/`: optional adaptive-search search spaces
@@ -236,14 +236,14 @@ The Karpathy-style inner loop stays small:
 
 ```text
 prepare.py  - fixed during search
-train.py    - experiment surface
-program.md  - agent instructions
+train.py    - training file
+program.md  - optional instructions for Claude/Codex sessions
 ```
 
 Search-time selection should happen on `val`. Use held-out `test` only for the
 final report of the winning checkpoint or finalists.
 
-See [program.md](program.md) for the full agent workflow and
+See [program.md](program.md) for the full Claude/Codex workflow and
 [examples/chestxray14/overnight_run.md](examples/chestxray14/overnight_run.md) for a
 ChestXray14-specific overnight example runbook.
 

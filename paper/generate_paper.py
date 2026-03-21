@@ -2,8 +2,8 @@
 Paper generator for autoresearch-medimage.
 
 Generates a draft LaTeX manuscript from results.tsv, checkpoint metadata,
-and final evaluation artifacts. The output is a real first draft — not a
-built from actual experiment data.
+and final evaluation artifacts. The output is a real first draft built from
+actual experiment data.
 
 Usage:
     uv run paper/generate_paper.py --dataset chestxray14
@@ -138,9 +138,9 @@ def generate_abstract(results_df, checkpoint_config, final_eval, dataset_name):
     num_experiments = len(results_df)
 
     lines = [
-        f"We present results from an autonomous agent-driven experiment campaign on the "
+        f"We present results from an automated experiment campaign on the "
         f"{escape_latex(dataset_name)} dataset. Over {num_experiments} experiments using fixed "
-        f"5-minute training budgets, an AI agent iteratively explored architectures, optimizers, "
+        f"5-minute training budgets, the search loop explored architectures, optimizers, "
         f"and augmentation strategies by modifying a single training script."
     ]
 
@@ -183,8 +183,8 @@ def generate_methods_section(checkpoint_config, results_df):
         "",
         r"\subsection{Experiment Framework}",
         f"All experiments were conducted using the autoresearch-medimage framework, "
-        f"which implements a fixed-budget autonomous research loop. Each experiment was "
-        f"limited to {int(time_budget)} seconds of wall-clock training time. An AI agent "
+        f"which implements a fixed-budget search loop. Each experiment was "
+        f"limited to {int(time_budget)} seconds of wall-clock training time. The search loop "
         f"iteratively modified the training configuration, keeping improvements and discarding "
         f"regressions based on validation performance. Model selection was performed exclusively "
         f"on the validation split to preserve the integrity of held-out evaluation.",
@@ -406,7 +406,7 @@ def generate_results_section(results_df, checkpoint_results, checkpoint_config,
         unique_backbones = results_df["backbone"].nunique()
         if unique_backbones > 1:
             lines.append(
-                f"The agent explored {unique_backbones} different backbone architectures. "
+                f"The search explored {unique_backbones} different backbone architectures. "
             )
 
     lines.append(
@@ -559,12 +559,12 @@ Deep learning has achieved strong results across a range of medical imaging
 tasks, but the experiment design process remains largely manual. Researchers
 typically select architectures, tune hyperparameters, and evaluate results
 through iterative trial and error. This work demonstrates an automated
-approach using the autoresearch-medimage framework, in which an AI agent
-autonomously explores the model design space under a fixed time budget.
+approach using the autoresearch-medimage framework, in which an automated
+search loop explores the model design space under a fixed time budget.
 
-The agent modifies a single training script (\texttt{{train.py}}) while the
+The search loop modifies a single training script (\texttt{{train.py}}) while the
 data loading and evaluation infrastructure (\texttt{{prepare.py}}) remains
-fixed. Each experiment is limited to a 5-minute wall-clock budget. The agent
+fixed. Each experiment is limited to a 5-minute wall-clock budget. The loop
 retains improvements and discards regressions, building on a monotonically
 improving baseline.
 
@@ -592,7 +592,7 @@ where the space of viable configurations is large.
 \item The fixed 5-minute budget limits each experiment to a fraction of a
 full training run, which may underestimate the performance of
 slower-converging architectures.
-\item The agent's search strategy is greedy and may miss configurations
+\item The search strategy is greedy and may miss configurations
 that require multiple coordinated changes to show improvement.
 \item Results should be validated on external datasets before drawing
 clinical conclusions.
@@ -640,7 +640,7 @@ def main():
     if args.compile:
         pdflatex = shutil.which("pdflatex")
         if not pdflatex:
-            print("pdflatex not found — .tex file is ready for manual compilation.")
+            print("pdflatex not found Ã¢â‚¬â€ .tex file is ready for manual compilation.")
             return
         result = subprocess.run(
             [pdflatex, "-interaction=nonstopmode", output_path.name],

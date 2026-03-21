@@ -47,7 +47,7 @@ The helper:
 - marks the latest row in `results.tsv` as `keep` or `discard`
 - can finalize the session at the end
 
-## Optional AdaEvolve-Lite Lane
+## Optional Adaptive Search Lane
 
 If you want the repo to keep multiple backbone branches alive and adapt which
 mutation families it trusts overnight, launch the optional adaptive mode:
@@ -243,6 +243,6 @@ uv run python tools/run_recipe_queue.py `
 - Foundation-model recipes are intentionally left out of this preset because
   first-run downloads and larger memory footprints make the overnight lane less
   stable on consumer GPUs and short-lived notebook runtimes.
-- The queue helper is an outer-loop convenience. The inner-loop research
-  contract is unchanged: `prepare.py` stays fixed, `train.py` remains the main
-  mutation surface, and the default research budget is still 300 seconds.
+- The queue helper is an outer-loop convenience. The inner loop is unchanged:
+  `prepare.py` stays fixed, experiments still run through `train.py`, and the
+  default research budget is still 300 seconds.

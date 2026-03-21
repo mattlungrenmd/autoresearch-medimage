@@ -87,19 +87,18 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 | DR grading (512px) | 16GB | A100 (40GB) | 8-16 |
 | ViT/Large models | 24GB+ | A100 (80GB) | 8-16 |
 
-## Running Overnight (Agent Session)
+## Running Overnight
 
-For the full autoresearch experience, keep a Claude/Codex session attached to
+For an interactive overnight run, keep a Claude or Codex session attached to
 this repo and point it at `program.md`.
 
-This repository does **not** ship a standalone overnight scheduler that edits
-`train.py` on its own. The autonomy comes from the agent session following the
-repo contract:
+This repository does **not** ship a standalone scheduler that rewrites
+`train.py` on its own. The usual pattern is simple:
 
-- `prepare.py` stays fixed
-- `train.py` is the experiment surface
-- each run uses the fixed 300-second budget
-- the agent keeps or discards ideas based on the metric and `results.tsv`
+- keep `prepare.py` fixed
+- run experiments through `train.py`
+- use a fixed short budget per run
+- use `results.tsv` to track which runs to keep or discard
 
 A practical pattern is:
 
@@ -119,5 +118,5 @@ Rough overnight capacity for 8 hours:
 - **T4**: about 90 fixed-budget experiments
 - **A100**: about 95 fixed-budget experiments
 
-Those numbers assume an agent is continuously driving the loop, not a passive
-shell script.
+Those numbers assume an interactive Claude/Codex session is continuously
+driving the loop, not a passive shell script.

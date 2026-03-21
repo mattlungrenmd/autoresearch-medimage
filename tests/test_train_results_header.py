@@ -78,7 +78,7 @@ class TrainResultsHeaderTests(unittest.TestCase):
             train.CURRENT_RUN_METADATA = {
                 "candidate_id": "cand0007",
                 "parent_id": "cand0003",
-                "search_algo": "adaevolve_lite",
+                "search_algo": "adaptive_search",
                 "mutation_op": "lr_wd",
                 "base_recipe": "chestxray14_advanced",
                 "replicate_group": "cand0007",

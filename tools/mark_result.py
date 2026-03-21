@@ -2,7 +2,7 @@
 Mark an experiment row in results.tsv as keep, discard, or candidate.
 
 This is the lightweight helper for the search phase:
-`train.py` appends rows automatically, and the agent/human can then mark the
+`train.py` appends rows automatically, and you can then mark the
 latest result as kept or discarded after reading run.log.
 """
 

@@ -1,5 +1,5 @@
 """
-Generate an AdaEvolve-lite search summary from session-sidecar artifacts.
+Generate an adaptive-search summary from session-sidecar artifacts.
 """
 
 from __future__ import annotations
@@ -263,7 +263,7 @@ def generate_search_report(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate an AdaEvolve-lite search report for a session")
+    parser = argparse.ArgumentParser(description="Generate an adaptive-search report for a session")
     parser.add_argument("--session", type=str, required=True, help="Search session tag")
     parser.add_argument("--results", type=Path, default=DEFAULT_RESULTS, help="Path to results.tsv")
     parser.add_argument("--search-dir", type=Path, default=None, help="Optional explicit search directory")

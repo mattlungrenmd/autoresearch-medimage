@@ -1,9 +1,8 @@
 # Overnight ChestXray14 Example
 
-This is the runbook for an overnight search session. The agent runs fast,
-fixed-budget experiments to find the best model backbone and hyperparameters
-for the ChestXray14 benchmark. The winning configuration then informs a
-full-scale training run.
+This is the runbook for an overnight ChestXray14 search session. The goal is
+to run many short experiments, keep the useful ones, and use the best result
+to guide a longer follow-up run.
 
 If you want the Colab-friendly version of this idea, use
 `notebooks/colab_autoresearch.ipynb`. That notebook runs a named multi-run
@@ -13,7 +12,7 @@ frontier instead of tunneling on only one recipe.
 
 ## Goal
 
-Start a fresh named session, let the agent search for 6-8 hours, and end
+Start a fresh named session, let Claude or Codex search for 6-8 hours, and end
 with:
 
 - an updated `results.tsv`
@@ -27,7 +26,7 @@ with:
 - `data/chestxray14/splits.csv` contains `train`, `val`, and `test`
 - the workspace has a clean session tag ready (for example `chestxray14_overnight_20260310`)
 - `prepare.py` stays fixed during the run
-- `train.py` is the only experiment surface
+- `train.py` is the only file edited during the search phase
 
 For safety, run the overnight session in an isolated workspace or clone so the
 main repo can still be edited separately without affecting the experiment.

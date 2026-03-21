@@ -36,7 +36,7 @@ For multi-hour sessions:
 - do not use literature numbers for keep/discard decisions
 - do not rely on vague instructions like "keep going" or "continue until interrupted" alone
 - prefer a concrete stop condition such as "50 completed experiments after the session baseline"
-- tell the agent not to send a final summary before that stop condition unless it hits a real blocker
+- tell Claude or Codex not to send a final summary before that stop condition unless it hits a real blocker
 
 ## Full Training
 
@@ -47,7 +47,7 @@ paper artifacts from the final checkpoint with `tools/finalize_run.py`.
 ## Boundaries
 
 - `prepare.py` is fixed during the search phase
-- `train.py` is the only experiment surface
+- `train.py` is the only file edited during the search phase
 - built-in recipes are baselines and examples
 - custom datasets are first-class through the dataset contract under `data/<dataset>/`
 - paper generator produces a real first draft from experiment data, run after the search phase

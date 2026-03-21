@@ -75,7 +75,7 @@ class SearchReportTests(unittest.TestCase):
                         "",
                         "cand0001",
                         "",
-                        "adaevolve_lite",
+                        "adaptive_search",
                         "seed",
                         "chestxray14_advanced",
                         "cand0001",
@@ -88,7 +88,7 @@ class SearchReportTests(unittest.TestCase):
             (search_dir / "search_state.json").write_text(
                 json.dumps(
                     {
-                        "search_algo": "adaevolve_lite",
+                        "search_algo": "adaptive_search",
                         "dataset": "chestxray14",
                         "completed_runs": 1,
                         "non_improving_runs": 0,

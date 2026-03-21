@@ -1,107 +1,39 @@
-# ChestXray14 Case Study: Medical Imaging vs `karpathy/autoresearch`
+# ChestXray14 Case Study
 
-This repo is intentionally close to the spirit of
-[`karpathy/autoresearch`](https://github.com/karpathy/autoresearch), but
-medical-imaging workloads forced a few important differences.
+This note summarizes what changed when we adapted
+[`karpathy/autoresearch`](https://github.com/karpathy/autoresearch) to a
+medical-imaging benchmark.
 
-This document is a worked example from one ChestXray14 experiment series. It is
-here to explain why the repo includes optional refinement and promotion
-helpers, not to claim that every dataset, backbone family, or time budget will
-behave the same way.
+It is one worked example, not a claim that every dataset will behave the same
+way.
 
-## What We Kept
+## What Stayed The Same
 
-- `prepare.py` stays fixed during experiment loops.
-- `train.py` remains the main experiment surface.
-- the default short research loop still uses a fixed wall-clock budget
-- `results.tsv` stays the untracked experiment ledger
-- the point is still tight, comparable, reproducible search rather than a large
-  generic orchestration framework
+- `prepare.py` stays fixed during search runs
+- `train.py` is still the file used for each scored run
+- short runs are compared under a fixed wall-clock budget
+- `results.tsv` remains the untracked results log
 
-## What Medical Imaging Changed
+## What Changed For Medical Imaging
 
-### 1. The short wall-clock loop is still useful, but it is not the whole story
+- the metric is task-specific (`mean_auc`, F1, Dice, QWK, accuracy), not bits
+  per byte
+- the data contract has to handle labeled image folders, split files, and
+  segmentation masks
+- the search space is different: backbones, image sizes, augmentation, loss,
+  optimizer, and regularization choices matter much more than tokenization or
+  sequence length
+- slower image models can rerank later, so the repo includes optional helpers
+  for adaptive search, refinement, and longer follow-up runs
 
-For language modeling, a short fixed wall-clock budget can be much closer to
-"the real winner" because early optimization dynamics often dominate the
-benchmark of interest. For medical imaging, especially across different
-backbone families, we observed that strong candidates can mature on very
-different timescales.
+## What Happened On ChestXray14
 
-That means a fixed short search budget is still the right *screening* tool, but
-it is not always the right *final model selection* tool.
+The short search was useful for finding promising candidates quickly, but the
+ranking changed once we trained several finalists longer.
 
-### 2. We search on validation AUC, not bits-per-byte
+In one local experiment series on March 14-15, 2026:
 
-The metric in this repo is task-specific:
-
-- classification: accuracy/AUC style metrics
-- multilabel classification: `mean_auc`
-- segmentation: overlap metrics such as Dice or IoU
-
-The equivalent of the `autoresearch` "fairness contract" is:
-
-- fixed wall-clock search budget
-- fixed dataset split protocol
-- a task-appropriate primary metric
-
-### 3. A promotion stage is necessary
-
-In practice, medical-imaging search needs at least two stages:
-
-1. a short wall-clock search to find promising architectures and recipe regions
-2. a longer promotion stage to rerank top diverse candidates fairly
-
-For stronger benchmark work, a useful pattern is actually three stages:
-
-1. broad short-budget search
-2. mid-budget refinement search around top diverse candidates
-3. long-budget promotion runs for the finalists
-
-### 4. The outer loop needs to manage branches, not just single winners
-
-In language-model autoresearch, a single improving line of attack can often be
-good enough for a long stretch. In medical imaging, backbone families can
-behave very differently under the same time budget, so the repo ships an
-optional outer loop that is more explicit about branch management.
-
-At a high level, that outer loop:
-
-- seeds from tracked recipes or prior winner sessions
-- keeps a small archive of strong candidates across multiple branches
-- proposes children by mutating one family at a time
-- records parent/child lineage and generated overlay configs
-- reruns small gains so noisy improvements are less likely to take over
-
-The important point is that this is still layered on top of the same inner
-contract. `train.py` remains the scoring surface; the outer loop only decides
-what to try next and how to keep the search state organized.
-
-## Repo-Level Modifications vs `karpathy/autoresearch`
-
-The repo-level changes are practical rather than philosophical.
-
-- different data contract: image folders, segmentation masks, and explicit
-  split files instead of text corpora
-- different metrics: AUC / Dice / QWK instead of bits per byte
-- different search space: backbones, image sizes, augmentation policies, loss
-  functions, and regularization knobs
-- optional search helpers: `run_search_session.py`,
-  `build_refinement_space.py`, `run_full_train.py`, and
-  `run_full_train_queue.py`
-- optional staged workflow: broad search, refinement search, then promotion
-  runs
-
-Those additions are there because medical-imaging workloads make
-"best-at-300-seconds" and "best eventual model" diverge more often than we
-would like.
-
-## Concrete ChestXray14 Lesson
-
-In a cold-start local ChestXray14 session on March 14-15, 2026, the short-loop
-winner was not the long-loop winner:
-
-- best short-budget promoted winner rerun:
+- short-run promoted winner rerun:
   `efficientnet_b0`, `81.088263` mean AUC at 10 epochs
 - promoted runner-up:
   `densenet169`, `84.726800` mean AUC at 10 epochs
@@ -110,60 +42,31 @@ winner was not the long-loop winner:
 - promoted runner-up:
   alternate `efficientnet_b0` recipe, `84.802390` mean AUC at 10 epochs
 
-The short search was still valuable because it surfaced the candidate set. But
-the final ranking changed materially once we let diverse candidates train
-longer.
+The short run still did its job: it surfaced the candidate set. It just was not
+enough on its own to rank the final winner.
 
-That is the main lesson behind the optional staged workflow in this repo.
+## Practical Workflow
 
-## One More Important Lesson
+For medical-imaging benchmarks, the most useful pattern so far is:
 
-The staged workflow is useful partly because it can invalidate promising
-intermediate winners.
+1. broad short-budget search
+2. refinement search around the top diverse candidates
+3. longer follow-up runs for the finalists
 
-In a later follow-up, several stage-2 refinement winners were promoted directly
-to `20` epochs and underperformed their shorter-horizon scores. That does not
-mean the earlier search was useless. It means the handoff between budgets is
-itself something researchers need to validate.
+That is why the repo ships:
 
-In practice, this repo should be framed as a strong candidate-discovery and
-staged-validation framework, not as a guarantee that one short search or one
-promotion rule will always produce the final best model automatically.
+- `tools/run_search_session.py`
+- `tools/build_refinement_space.py`
+- `tools/run_full_train.py`
+- `tools/run_full_train_queue.py`
 
-## Recommended Workflow
+## Takeaway
 
-### Stage 1: Broad Search
+For this kind of workload, the repo is strongest as:
 
-- keep the default `300s` contract as the baseline/autoresearch-compatible loop
-- use `--time-budget 900` when you want a stronger screening budget on local or
-  hosted GPUs
-- optimize for breadth: backbones, loss families, augmentation presets,
-  optimizer/LR/WD regions
+- a candidate-discovery tool
+- a way to compare strong alternatives under a consistent short budget
+- a staged validation workflow for follow-up runs
 
-### Stage 2: Refinement Search
-
-- select the top diverse candidates from stage 1
-- run a second search session at a longer wall-clock budget
-- retune hyperparameters under that longer budget instead of freezing the
-  stage-1 recipe
-
-### Stage 3: Promotion
-
-- run the top refined candidates for a longer epoch or wall-clock budget
-- use this stage for final ranking, checkpoint selection, and any final held-out
-  evaluation
-
-## What This Means For The Repo
-
-This repo is not trying to become a generic search framework. The goal is
-still:
-
-- minimal enough to understand
-- reproducible enough to trust
-- useful enough that a researcher with a labeled 2D medical-imaging dataset can
-  actually run it
-
-The main repo-level addition is therefore not "more agent." It is a staged,
-budget-aware workflow that keeps the autoresearch spirit while helping
-researchers discover strong candidates quickly and then validate them more
-carefully when a benchmark needs it.
+It should not be read as a promise that one short search or one promotion rule
+will always pick the final best model automatically.

@@ -5,22 +5,22 @@ without mixing it into an existing local session.
 
 ## Goal
 
-Run a second agent-driven search on `chestxray14` in Colab with:
+Run a second search on `chestxray14` in Colab with:
 
 - a separate workspace
 - a separate session tag
 - a separate `results.tsv`
 - checkpoints and artifacts copied to Google Drive for recovery
 - an optional fixed recipe queue for architecture-first sweeps
-- an optional AdaEvolve-lite adaptive search lane
+- an optional adaptive search lane
 
 This is meant to complement a local overnight run, not replace it.
 
 ## Guardrails
 
 - Keep `prepare.py` fixed during the experiment loop.
-- Treat `train.py` as the experiment mutation surface.
-- Use the default 300-second budget for the research loop.
+- Run experiments through `train.py`.
+- Use the default 300-second budget for the main search loop.
 - Use a new session tag such as `chestxray14_overnight_colab_20260310`.
 - Do not share `results.tsv` with a local overnight workspace while both are active.
 - Do not use held-out `test` for inner-loop keep/discard decisions.
@@ -249,9 +249,9 @@ If you only want the single best refined candidate instead:
 !cp -r /content/autoresearch-medimage-colab/logs/. "$DRIVE_ROOT/logs/" || true
 ```
 
-## Agent Prompt
+## Claude/Codex Prompt
 
-Use this in a fresh agent session attached to the Colab workspace:
+Use this in a fresh Claude or Codex session attached to the Colab workspace:
 
 ```text
 Read README.md, examples/chestxray14/overnight_run.md, examples/chestxray14/README.md, CLAUDE.md, program.md, prepare.py, train.py, results.tsv, and run.log if present.
@@ -285,7 +285,7 @@ Replace the session tag in the prompt if you launch on a different date.
 
 ## Queue-Driven Alternative
 
-If you do not want the agent to mutate `train.py` mid-session and instead want a
+If you do not want a Claude/Codex session editing `train.py` mid-session and instead want a
 clean architecture-first sweep on Colab, use the queue helper directly:
 
 ```bash

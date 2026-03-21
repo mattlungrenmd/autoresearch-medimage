@@ -1,4 +1,4 @@
-﻿"""
+"""
 Run a fixed recipe queue inside a single session and mark keep/discard automatically.
 
 This is an outer-loop helper for local or Colab sessions when you want a

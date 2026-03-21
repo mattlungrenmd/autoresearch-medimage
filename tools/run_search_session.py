@@ -1,5 +1,5 @@
 """
-Run an optional AdaEvolve-lite outer loop on top of train.py.
+Run an optional adaptive search loop on top of train.py.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from tools.search_report import generate_search_report
 RESULTS_FILE = REPO_DIR / "results.tsv"
 RECIPES_DIR = REPO_DIR / "recipes"
 SEARCH_SPACES_DIR = REPO_DIR / "search_spaces"
-DEFAULT_ALGO = "adaevolve_lite"
+DEFAULT_ALGO = "adaptive_search"
 MAX_RECIPE_STEM = 96
 SEARCH_METADATA_FIELDS = [
     "candidate_id",
@@ -1067,7 +1067,7 @@ def bounded_operator_reward(parent_metric: float, child_metric: float, candidate
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run an AdaEvolve-lite search session")
+    parser = argparse.ArgumentParser(description="Run an adaptive search session")
     parser.add_argument("--dataset", type=str, default=None, help="Dataset override; defaults to the search-space dataset")
     parser.add_argument("--session", type=str, required=True, help="Session tag for logs/results")
     parser.add_argument("--space", type=str, default="chestxray14", help="Search space name or explicit YAML path")
@@ -1199,7 +1199,7 @@ def main():
         save_state(session_dir, state)
         generate_search_report(args.session, results_path=args.results, search_dir=session_dir)
 
-    print("AdaEvolve-lite session complete:")
+    print("Adaptive search session complete:")
     print(f"  session: {args.session}")
     print(f"  dataset: {dataset}")
     print(f"  completed runs: {state.get('completed_runs', 0)}")

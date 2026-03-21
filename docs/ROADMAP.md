@@ -11,9 +11,9 @@ existing ecosystem tighter.
 
 The search -> train -> report loop works end-to-end for 2D tasks.
 
-- agent-first workflow: Claude/Codex edits `train.py`, follows `program.md`
+- interactive Claude/Codex workflow: edit `train.py`, follow `program.md`
 - bring-your-own-data via `data/<dataset>/dataset.yaml` or auto-detect
-- fixed 300-second experiment budget, `results.tsv` ledger, session isolation
+- fixed 300-second experiment budget, `results.tsv` log, session isolation
 - 2D classification, multilabel classification, binary segmentation
 - 13 recipes, 7 built-in datasets, Colab notebook
 - winning configuration output at end of search
@@ -21,7 +21,7 @@ The search -> train -> report loop works end-to-end for 2D tasks.
 
 ## v1.1 - Smarter Search
 
-Make the agent find better models faster.
+Make the search loop find better models faster.
 
 | Capability | Why it matters |
 |---|---|
