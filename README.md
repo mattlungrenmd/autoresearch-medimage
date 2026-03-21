@@ -7,6 +7,9 @@ It is built for researchers with labeled 2D medical imaging datasets who want
 an agent-first loop for candidate discovery: backbones, losses, augmentations,
 and training settings under a fixed experiment contract.
 
+Built by [Matthew Lungren](https://github.com/mattlungrenmd) as a practical
+medical-imaging extension of the `autoresearch` idea.
+
 The repo is strongest today for:
 
 - candidate discovery on labeled medical imaging datasets
