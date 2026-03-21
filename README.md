@@ -121,7 +121,7 @@ What stayed the same:
 
 What changed for medical imaging:
 
-- the objective is task-specific (`mean_auc`, Dice, QWK, accuracy), not bits per
+- the objective is task-specific (`mean_auc`, F1, Dice, QWK, accuracy), not bits per
   byte
 - the dataset contract has to handle labeled image folders, splits, masks, and
   Kaggle-style prep flows

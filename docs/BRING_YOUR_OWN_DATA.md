@@ -21,7 +21,7 @@ Required fields:
 ```yaml
 name: "your_dataset"
 task: "classification"        # classification | multilabel | segmentation
-metric: "auc"                 # classification: accuracy | auc | quadratic_kappa
+metric: "auc"                 # classification: accuracy | auc | f1 | macro_f1 | quadratic_kappa
 num_classes: 2
 class_names: ["negative", "positive"]
 in_channels: 1                # 1 or 3
@@ -33,7 +33,8 @@ description: "Short dataset description"   # optional
 
 Notes:
 
-- `multilabel` uses `metric: mean_auc`
+- classification also supports `metric: f1` and `metric: macro_f1`
+- `multilabel` also supports `metric: macro_f1` and `metric: micro_f1`
 - segmentation support in public v1 is binary only (`num_classes: 2`)
 - `mean` and `std` default to ImageNet-style values if omitted
 

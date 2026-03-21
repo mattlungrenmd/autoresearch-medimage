@@ -1101,7 +1101,7 @@ def tta_predict(model, images, device):
 
 
 def optimize_thresholds(probs, targets, num_classes):
-    """Find optimal sigmoid threshold per class for multilabel tasks."""
+    """Fit per-class validation thresholds for multilabel F1 reporting."""
     thresholds = np.full(num_classes, 0.5)
     for i in range(num_classes):
         best_f1, best_t = 0.0, 0.5
@@ -1186,6 +1186,13 @@ def evaluate_classification_loader(model, loader, cfg, device):
     accuracy = 100.0 * (all_preds == all_targets).mean()
     avg_loss = total_loss / max(total_samples, 1)
     kappa = cohen_kappa_score(all_targets, all_preds, weights="quadratic")
+    if num_classes == 2:
+        f1 = 100.0 * f1_score(all_targets, all_preds, zero_division=0)
+        macro_f1 = 100.0 * f1_score(all_targets, all_preds, average="macro", zero_division=0)
+    else:
+        macro_f1 = 100.0 * f1_score(all_targets, all_preds, average="macro", zero_division=0)
+        # For multiclass problems, plain "f1" is ambiguous; treat it as macro-F1.
+        f1 = macro_f1
 
     try:
         if num_classes == 2:
@@ -1199,6 +1206,8 @@ def evaluate_classification_loader(model, loader, cfg, device):
         "accuracy": accuracy,
         "loss": avg_loss,
         "auc": auc,
+        "f1": float(f1),
+        "macro_f1": float(macro_f1),
         "kappa": float(kappa),
         "artifacts": {
             "val_probs": all_probs.astype(np.float16),
@@ -1209,7 +1218,7 @@ def evaluate_classification_loader(model, loader, cfg, device):
 
 
 @torch.no_grad()
-def evaluate_multilabel_loader(model, loader, cfg, device):
+def evaluate_multilabel_loader(model, loader, cfg, device, thresholds=None, optimize_thresholds_for_f1=False):
     num_classes = cfg["num_classes"]
     model.eval()
     all_probs = []
@@ -1229,24 +1238,55 @@ def evaluate_multilabel_loader(model, loader, cfg, device):
     all_probs = torch.cat(all_probs).numpy()
     all_targets = torch.cat(all_targets).numpy()
 
+    if thresholds is None:
+        if optimize_thresholds_for_f1:
+            # Only fit thresholds on validation-time runs; test evaluation should reuse stored thresholds.
+            thresholds = optimize_thresholds(all_probs, all_targets, num_classes)
+        else:
+            thresholds = np.full(num_classes, 0.5, dtype=np.float32)
+    else:
+        thresholds = np.asarray(thresholds, dtype=np.float32)
+        if thresholds.shape != (num_classes,):
+            raise ValueError(f"thresholds must have shape ({num_classes},), got {thresholds.shape}")
+
+    preds = (all_probs >= thresholds.reshape(1, -1)).astype(np.uint8)
+
     per_class_auc = {}
     valid_aucs = []
+    per_class_f1 = {}
+    valid_f1s = []
     for idx in range(num_classes):
+        class_name = cfg["class_names"][idx]
         try:
             auc = roc_auc_score(all_targets[:, idx], all_probs[:, idx])
-            per_class_auc[cfg["class_names"][idx]] = round(100.0 * auc, 2)
+            per_class_auc[class_name] = round(100.0 * auc, 2)
             valid_aucs.append(auc)
         except ValueError:
-            per_class_auc[cfg["class_names"][idx]] = 0.0
+            per_class_auc[class_name] = 0.0
+        class_f1 = 100.0 * f1_score(all_targets[:, idx], preds[:, idx], zero_division=0)
+        per_class_f1[class_name] = round(class_f1, 2)
+        valid_f1s.append(class_f1)
 
     mean_auc = 100.0 * np.mean(valid_aucs) if valid_aucs else 0.0
+    macro_f1 = float(np.mean(valid_f1s)) if valid_f1s else 0.0
+    micro_f1 = 100.0 * f1_score(all_targets.reshape(-1), preds.reshape(-1), zero_division=0)
+    f1_thresholds = {
+        cfg["class_names"][idx]: round(float(thresholds[idx]), 3)
+        for idx in range(num_classes)
+    }
     return {
         "mean_auc": mean_auc,
         "per_class_auc": per_class_auc,
+        "macro_f1": float(macro_f1),
+        "micro_f1": float(micro_f1),
+        "per_class_f1": per_class_f1,
+        "f1_thresholds": f1_thresholds,
         "artifacts": {
             "val_probs": all_probs.astype(np.float16),
             "val_targets": all_targets.astype(np.uint8),
+            "val_preds": preds.astype(np.uint8),
             "class_names": list(cfg["class_names"]),
+            "f1_thresholds": thresholds.astype(np.float32),
         },
     }
 
@@ -1590,12 +1630,17 @@ def list_recipes():
 
 def primary_metric_for_results(results, cfg):
     if cfg["task"] == "multilabel":
-        return "mean_auc", float(results["mean_auc"])
+        metric_name = cfg["metric"]
+        if metric_name in {"auc", "mean_auc"}:
+            return "mean_auc", float(results["mean_auc"])
+        return metric_name, float(results[metric_name])
     if cfg["task"] == "segmentation":
         metric_name = cfg["metric"]
         return metric_name, float(results.get(metric_name, results["dice"]))
     if cfg["metric"] in {"quadratic_kappa", "kappa"}:
         return cfg["metric"], float(results["kappa"])
+    if cfg["metric"] in {"f1", "macro_f1"}:
+        return cfg["metric"], float(results[cfg["metric"]])
     return cfg["metric"], float(results.get(cfg["metric"], results["accuracy"]))
 
 
@@ -1916,8 +1961,16 @@ def main():
 
     eval_model = ema_model.ema_model if ema_model is not None else model
     if task == "multilabel":
-        results = evaluate_multilabel_loader(eval_model, val_loader, cfg, device)
+        results = evaluate_multilabel_loader(
+            eval_model,
+            val_loader,
+            cfg,
+            device,
+            optimize_thresholds_for_f1=True,
+        )
         print(f"mean_auc:         {results['mean_auc']:.2f}%")
+        print(f"macro_f1:         {results['macro_f1']:.2f}%")
+        print(f"micro_f1:         {results['micro_f1']:.2f}%")
         print("per_class_auc:")
         for pathology, auc in results["per_class_auc"].items():
             print(f"  {pathology:<22s} {auc:.2f}%")
@@ -1925,6 +1978,8 @@ def main():
         results = evaluate_classification_loader(eval_model, val_loader, cfg, device)
         print(f"val_accuracy:     {results['accuracy']:.2f}%")
         print(f"val_auc:          {results['auc']:.2f}%")
+        print(f"val_f1:           {results['f1']:.2f}%")
+        print(f"val_macro_f1:     {results['macro_f1']:.2f}%")
         print(f"val_kappa:        {results['kappa']:.4f}")
         print(f"val_loss:         {results['loss']:.6f}")
     else:

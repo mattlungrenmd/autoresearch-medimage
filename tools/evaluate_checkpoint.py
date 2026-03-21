@@ -57,6 +57,10 @@ def metric_summary(results, cfg):
         lines.append("per_class_auc:")
         for name, value in results["per_class_auc"].items():
             lines.append(f"  {name}: {float(value):.2f}")
+    if "per_class_f1" in results:
+        lines.append("per_class_f1:")
+        for name, value in results["per_class_f1"].items():
+            lines.append(f"  {name}: {float(value):.2f}")
     return metric_name, primary_metric, "\n".join(lines)
 
 
@@ -95,7 +99,17 @@ def main():
     loader = train_mod.build_loader(dataset_name, cfg, batch_size, split=args.split)
 
     if task == "multilabel":
-        results = train_mod.evaluate_multilabel_loader(model, loader, cfg, device)
+        stored_thresholds = None
+        result_thresholds = payload.get("results", {}).get("f1_thresholds")
+        if isinstance(result_thresholds, dict):
+            stored_thresholds = [
+                float(result_thresholds.get(class_name, 0.5))
+                for class_name in cfg["class_names"]
+            ]
+        elif "artifacts" in payload.get("results", {}):
+            artifacts = payload["results"]["artifacts"]
+            stored_thresholds = artifacts.get("f1_thresholds")
+        results = train_mod.evaluate_multilabel_loader(model, loader, cfg, device, thresholds=stored_thresholds)
     elif task == "classification":
         results = train_mod.evaluate_classification_loader(model, loader, cfg, device)
     else:

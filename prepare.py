@@ -170,8 +170,8 @@ DATASETS = {
 
 SUPPORTED_TASKS = {"classification", "multilabel", "segmentation"}
 SUPPORTED_METRICS = {
-    "classification": {"accuracy", "auc", "quadratic_kappa", "kappa"},
-    "multilabel": {"auc", "mean_auc"},
+    "classification": {"accuracy", "auc", "quadratic_kappa", "kappa", "f1", "macro_f1"},
+    "multilabel": {"auc", "mean_auc", "macro_f1", "micro_f1"},
     "segmentation": {"dice", "iou", "pixel_acc"},
 }
 
