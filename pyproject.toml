@@ -38,4 +38,4 @@ all = [
 ]
 
 [project.urls]
-Repository = "https://github.com/mlungrengmail/autoresearch-medimage"
+Repository = "https://github.com/mattlungrenmd/autoresearch-medimage"

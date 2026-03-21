@@ -5,9 +5,9 @@
 ### Google Colab (Free Tier)
 - **GPU**: T4 (16GB VRAM) - free, limited hours
 - **Notebook options**:
-  - [Quick start](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb) for smoke tests and BYOD
-  - [Single benchmark demo](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb) for one ChestXray14 run
-  - [Autoresearch session](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb) for a named multi-run search
+  - [Quick start](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb) for smoke tests and BYOD
+  - [Single benchmark demo](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb) for one ChestXray14 run
+  - [Autoresearch session](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb) for a named multi-run search
 - **Setup**:
 ```python
 # In a Colab notebook (public repo, no GitHub token needed):
@@ -16,7 +16,7 @@ import os
 os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH"]
 
 !rm -rf /content/autoresearch-medimage /content/autoresearch-medimage-main /content/repo.zip
-!wget -q https://github.com/mlungrengmail/autoresearch-medimage/archive/refs/heads/main.zip -O /content/repo.zip
+!wget -q https://github.com/mattlungrenmd/autoresearch-medimage/archive/refs/heads/main.zip -O /content/repo.zip
 !unzip -q /content/repo.zip -d /content
 !mv /content/autoresearch-medimage-main /content/autoresearch-medimage
 %cd /content/autoresearch-medimage
@@ -37,7 +37,7 @@ os.environ["PATH"] = os.path.expanduser("~/.local/bin") + ":" + os.environ["PATH
 - **Setup**:
 ```python
 # Kaggle notebook - datasets auto-available
-!git clone https://github.com/mlungrengmail/autoresearch-medimage
+!git clone https://github.com/mattlungrenmd/autoresearch-medimage
 %cd autoresearch-medimage
 !pip install -e .
 # Kaggle datasets are pre-mounted at /kaggle/input/

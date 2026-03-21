@@ -61,7 +61,7 @@ If GitHub is good enough as the starting point:
 
 ```bash
 !rm -rf /content/autoresearch-medimage-colab
-!git clone https://github.com/mlungrengmail/autoresearch-medimage.git /content/autoresearch-medimage-colab
+!git clone https://github.com/mattlungrenmd/autoresearch-medimage.git /content/autoresearch-medimage-colab
 ```
 
 If you want the exact state of a local workspace instead, upload a zip snapshot
@@ -314,7 +314,7 @@ Suggested restore cells:
 
 ```bash
 !rm -rf /content/autoresearch-medimage-colab
-!git clone https://github.com/mlungrengmail/autoresearch-medimage.git /content/autoresearch-medimage-colab
+!git clone https://github.com/mattlungrenmd/autoresearch-medimage.git /content/autoresearch-medimage-colab
 %cd /content/autoresearch-medimage-colab
 !python -m pip install -q uv
 !uv sync

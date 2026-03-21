@@ -67,11 +67,11 @@ original paper tables.
 You can use the public notebooks on a free T4 GPU with no local install.
 
 - Quick start:
-  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+  [Open in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
 - Single benchmark demo:
-  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb)
+  [Open in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/examples/chestxray14/colab_demo.ipynb)
 - Multi-run ChestXray14 search:
-  [Open in Colab](https://colab.research.google.com/github/mlungrengmail/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb)
+  [Open in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_autoresearch.ipynb)
 
 Notebook files in the repo:
 
