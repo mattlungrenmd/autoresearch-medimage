@@ -1,38 +1,63 @@
 # autoresearch-medimage
 
-`autoresearch-medimage` is a medical-imaging adaptation of
-[Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch).
+**Reproducible candidate discovery for medical imaging AI.**
 
-It is built for researchers with labeled 2D medical imaging datasets who want
-fast candidate discovery: backbones, losses, augmentations, and training
-settings under a fixed short-run workflow.
+A Python/PyTorch adaptation of [Andrej Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch)
+for labeled 2D medical images. Compare model backbones, losses, augmentations,
+and training settings under a fixed experiment budget, then train and evaluate
+promising candidates for longer.
 
-Built by [Matthew Lungren](https://github.com/mattlungrenmd) as a practical
-medical-imaging extension of the `autoresearch` idea.
+Built by [Matthew Lungren](https://github.com/mattlungrenmd).
 
-The repo is strongest today for:
+[Try in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+· [Bring your own data](docs/BRING_YOUR_OWN_DATA.md)
+· [ChestXray14 case study](examples/chestxray14/case_study.md)
 
-- candidate discovery on labeled medical imaging datasets
-- reproducible fixed-budget search runs on local GPU or Colab
-- staged validation after search, using held-out `test` only at the end
+## Project at a Glance
 
-It is not positioned as a turnkey final-model selector. Treat the search loop
-as a way to surface strong candidates quickly, then validate the finalists
-carefully.
+| Area | Implementation |
+| --- | --- |
+| Tasks | 2D classification, multilabel classification, and binary segmentation |
+| Experiments | Fixed wall-clock budgets, reproducible recipes, and a `results.tsv` ledger |
+| Search | Optional adaptive search with candidate lineage, refinement, and promotion runs |
+| Evaluation | Validation-based candidate selection; held-out test evaluation for final reporting |
+| Runtime | Local GPU workflows and Google Colab notebooks |
+
+## Explore the Implementation
+
+| Start here | What to review |
+| --- | --- |
+| [Dataset contract](docs/BRING_YOUR_OWN_DATA.md) and [`prepare.py`](prepare.py) | Image manifests, splits, labels, masks, and dataset validation |
+| [`train.py`](train.py) and [recipe templates](recipes/) | Training, task-specific metrics, and reproducible configuration |
+| [Search helper](tools/run_search_session.py) and [tests](tests/) | Experiment orchestration, lineage, and regression coverage |
+| [ChestXray14 case study](examples/chestxray14/case_study.md) | Why candidate rankings can change after longer training |
+
+The search loop is intended to discover candidates, with staged validation for
+the finalists. The case study documents a local experiment series where
+short-run rankings changed after longer training; those observations are not a
+claim of clinical validation or general benchmark superiority.
 
 ## Current Scope
 
-Public v1 supports:
+Public v1 supports 2D classification, 2D multilabel classification, and binary
+segmentation. Representative use cases include chest X-ray multilabel
+classification, fundus or OCT classification, and binary mask segmentation.
 
-- 2D classification
-- 2D multilabel classification
-- binary segmentation
+This is research tooling. Current scope does not include 3D, volumetric, or
+DICOM-series workflows, and the repository does not establish readiness for
+clinical use.
 
-Representative use cases:
+## Setup
 
-- chest X-ray multi-label classification
-- fundus or OCT classification
-- binary mask segmentation
+Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/). See
+[GPU setup](docs/GPU_SETUP.md) for hardware and runtime guidance, or use the
+Colab quick start above.
+
+```bash
+git clone https://github.com/mattlungrenmd/autoresearch-medimage.git
+cd autoresearch-medimage
+uv sync
+```
 
 ## Quick Start: Your Dataset
 
