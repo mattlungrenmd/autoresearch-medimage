@@ -23,6 +23,7 @@ if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
 import train as train_mod
+from tools.result_utils import normalize_status
 
 DEFAULT_RESULTS = REPO_DIR / "results.tsv"
 DEFAULT_LOG_ROOT = REPO_DIR / "logs"
@@ -63,10 +64,6 @@ TERMINAL_STATUSES = {"keep", "discard", "candidate"}
 
 def sanitize_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
-
-
-def normalize_status(value: object) -> str:
-    return str(value).strip().lower()
 
 
 def recipe_exists(recipe_name: str) -> bool:
