@@ -1,5 +1,7 @@
 # autoresearch-medimage
 
+[![Code checks](https://github.com/mattlungrenmd/autoresearch-medimage/actions/workflows/ci.yml/badge.svg)](https://github.com/mattlungrenmd/autoresearch-medimage/actions/workflows/ci.yml)
+
 **Reproducible candidate discovery for medical imaging AI.**
 
 A Python/PyTorch adaptation of [Andrej Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch)
@@ -275,6 +277,38 @@ ChestXray14-specific overnight example runbook.
 ## Roadmap
 
 See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Development
+
+Install the locked runtime and development dependencies, then run the static
+checks and CPU regression suite:
+
+```bash
+uv sync --locked
+uv run ruff check .
+uv run python -m unittest discover -s tests -v
+```
+
+The suite covers task metrics, result logging, candidate selection, recipe
+promotion, search orchestration, and report generation. GitHub Actions runs the
+same checks on macOS with Python 3.12. GPU performance and benchmark replication
+are separate from these checks.
+
+## About the Author
+
+[Matthew P. Lungren, MD, MPH](https://profiles.stanford.edu/matthew-lungren) is a
+physician-scientist focused on clinical AI evaluation and multimodal medical AI,
+co-founder of Stanford AIMI, and former Chief Scientific Officer for Health and
+Life Sciences at Microsoft.
+
+Selected collaborative work:
+
+- [CheXpert](https://aimi.stanford.edu/datasets/chexpert-chest-x-rays): chest
+  radiograph data and evaluation.
+- [MedHELM](https://doi.org/10.1038/s41591-025-04151-2): holistic evaluation of
+  language models for medical tasks.
+- [Healthcare Agent Orchestrator](https://github.com/Azure-Samples/healthcare-agent-orchestrator):
+  modular agents for multidisciplinary healthcare workflows.
 
 ## Acknowledgments
 

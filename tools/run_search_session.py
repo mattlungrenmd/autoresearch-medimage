@@ -23,6 +23,7 @@ if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
 from tools.search_report import generate_search_report
+from tools.result_utils import normalize_status
 
 RESULTS_FILE = REPO_DIR / "results.tsv"
 RECIPES_DIR = REPO_DIR / "recipes"
@@ -37,10 +38,6 @@ SEARCH_METADATA_FIELDS = [
     "base_recipe",
     "replicate_group",
 ]
-
-
-def normalize_status(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def safe_float(value, default=float("nan")) -> float:

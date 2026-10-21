@@ -15,6 +15,11 @@ from pathlib import Path
 import pandas as pd
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_DIR not in sys.path:
+    sys.path.insert(0, REPO_DIR)
+
+from tools.result_utils import valid_metric_rows
+
 DEFAULT_RESULTS = os.path.join(REPO_DIR, "results.tsv")
 
 
@@ -28,16 +33,15 @@ def select_rows(df, dataset=None, session=None):
     if df.empty:
         raise ValueError("No matching rows found in results.tsv")
 
-    if "metric" in df.columns:
-        df["metric"] = pd.to_numeric(df["metric"], errors="coerce")
-    if "status" in df.columns:
-        keep_rows = df[df["status"].astype(str).isin(["keep"])]
-        if not keep_rows.empty:
-            df = keep_rows
-        else:
-            candidate_rows = df[df["status"].astype(str).isin(["candidate", "keep"])]
-            if not candidate_rows.empty:
-                df = candidate_rows
+    df = valid_metric_rows(df)
+    if df.empty:
+        raise ValueError("No successful runs with finite metrics found")
+    keep_rows = df[df["status_norm"] == "keep"]
+    if not keep_rows.empty:
+        return keep_rows
+    candidate_rows = df[df["status_norm"] == "candidate"]
+    if not candidate_rows.empty:
+        return candidate_rows
     return df
 
 
@@ -113,6 +117,8 @@ def main():
     dataset_name = infer_dataset(df, explicit_dataset=args.dataset, explicit_session=session_name)
     selected = select_rows(df, dataset=dataset_name, session=session_name)
     winner = best_row(selected)
+    checkpoint_path = winner.get("checkpoint_path", "")
+    checkpoint_path = "" if pd.isna(checkpoint_path) else str(checkpoint_path).strip()
 
     progress_output = os.path.abspath(args.progress_output or os.path.join(REPO_DIR, "progress.png"))
     paper_output = os.path.abspath(
@@ -141,13 +147,13 @@ def main():
         REPO_DIR,
     )
 
-    if dataset_has_split(dataset_name, "test") and str(winner.get("checkpoint_path", "")).strip():
+    if dataset_has_split(dataset_name, "test") and checkpoint_path:
         run_command(
             [
                 python_exe,
                 os.path.join(REPO_DIR, "tools", "evaluate_checkpoint.py"),
                 "--checkpoint",
-                str(winner.get("checkpoint_path")),
+                checkpoint_path,
                 "--split",
                 "test",
                 "--output",
@@ -219,8 +225,8 @@ def main():
     if session_name:
         print(f"  session: {session_name}")
     print(f"  best metric: {winner.get('metric_name', 'metric')}={winner.get('metric', '')}")
-    print(f"  status basis: {'keep' if 'status' in selected.columns and (selected['status'] == 'keep').any() else 'candidate'}")
-    print(f"  checkpoint: {winner.get('checkpoint_path', '')}")
+    print(f"  status basis: {winner.get('status_norm') or 'unmarked'}")
+    print(f"  checkpoint: {checkpoint_path or 'not saved'}")
     print(f"  progress: {progress_output}")
     if final_eval_output:
         print(f"  final eval: {final_eval_output}")

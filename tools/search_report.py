@@ -6,16 +6,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+
+from tools.result_utils import normalize_status, valid_metric_rows
+
 DEFAULT_RESULTS = REPO_DIR / "results.tsv"
-
-
-def normalize_status(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def load_candidates(candidates_path: Path) -> list[dict]:
@@ -97,7 +99,7 @@ def generate_search_report(
         lines.append("")
 
     if not session_df.empty:
-        valid = session_df[session_df["status_norm"] != "crash"].copy()
+        valid = valid_metric_rows(session_df)
         if not valid.empty:
             best_row = valid.sort_values("metric", ascending=False).iloc[0]
             lines.extend(

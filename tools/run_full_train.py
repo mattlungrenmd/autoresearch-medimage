@@ -17,13 +17,14 @@ import pandas as pd
 import yaml
 
 REPO_DIR = Path(__file__).resolve().parent.parent
+if str(REPO_DIR) not in sys.path:
+    sys.path.insert(0, str(REPO_DIR))
+
+from tools.result_utils import normalize_status, valid_metric_rows
+
 RESULTS_FILE = REPO_DIR / "results.tsv"
 RECIPES_DIR = REPO_DIR / "recipes"
 TRAIN_SCRIPT = REPO_DIR / "train.py"
-
-
-def normalize_status(value: object) -> str:
-    return str(value or "").strip().lower()
 
 
 def read_results(path: Path) -> pd.DataFrame:
@@ -62,21 +63,12 @@ def filter_results(
 
 
 def select_winner_row(df: pd.DataFrame) -> pd.Series:
-    metric_df = df.copy()
-    if "metric" in metric_df.columns:
-        metric_df = metric_df[metric_df["metric"].notna()].copy()
-    if "status_norm" in metric_df.columns:
-        keep_df = metric_df[metric_df["status_norm"] == "keep"].copy()
-        if not keep_df.empty:
-            metric_df = keep_df
-        else:
-            non_crash = metric_df[metric_df["status_norm"] != "crash"].copy()
-            if not non_crash.empty:
-                metric_df = non_crash
+    metric_df = valid_metric_rows(df)
     if metric_df.empty:
-        raise ValueError("No non-crash winner candidates found")
-    if "metric" not in metric_df.columns:
-        return metric_df.iloc[-1]
+        raise ValueError("No successful runs with finite metrics found")
+    keep_df = metric_df[metric_df["status_norm"] == "keep"]
+    if not keep_df.empty:
+        metric_df = keep_df
     return metric_df.sort_values("metric", ascending=False).iloc[0]
 
 

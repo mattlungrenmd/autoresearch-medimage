@@ -15,6 +15,7 @@ if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
 from tools import run_full_train as rft
+from tools.result_utils import valid_metric_rows
 
 RUN_FULL_TRAIN = REPO_DIR / "tools" / "run_full_train.py"
 DEFAULT_RESULTS = REPO_DIR / "results.tsv"
@@ -49,16 +50,12 @@ def unique_ordered(values: list[str]) -> list[str]:
 def ranked_session_candidates(results_path: Path, session: str, dataset: str | None = None) -> list[dict]:
     df = rft.read_results(results_path)
     filtered = rft.filter_results(df, dataset=dataset, session=session)
-    filtered = filtered.copy()
     if "candidate_id" not in filtered.columns:
         raise ValueError("results.tsv does not contain a 'candidate_id' column for queue candidate selection")
-    filtered["candidate_id"] = filtered["candidate_id"].fillna("").astype(str)
+    filtered = valid_metric_rows(filtered)
+    filtered["candidate_id"] = filtered["candidate_id"].fillna("").astype(str).str.strip()
     filtered = filtered[filtered["candidate_id"] != ""].copy()
-    if "status_norm" in filtered.columns:
-        filtered = filtered[filtered["status_norm"] != "crash"].copy()
-    if "metric" in filtered.columns:
-        filtered = filtered[filtered["metric"].notna()].copy()
-        filtered = filtered.sort_values("metric", ascending=False)
+    filtered = filtered.sort_values("metric", ascending=False)
     return filtered.to_dict("records")
 
 
@@ -83,7 +80,7 @@ def select_candidate_ids(
     diverse_by: str = "branch",
 ) -> list[str]:
     selected = unique_ordered(list(candidate_ids or []))
-    if top_k is None or top_k <= 0:
+    if top_k is None or top_k <= 0 or len(selected) >= top_k:
         return selected
 
     rows = ranked_session_candidates(results_path, session=session, dataset=dataset)
