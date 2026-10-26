@@ -2,9 +2,7 @@
 
 # autoresearch-medimage
 
-**Autonomous search. Deliberate validation.**
-
-Reproducible candidate discovery for 2D medical imaging AI.
+**Autonomous experiments for 2D medical imaging**
 
 [Project page](https://mattlungrenmd.github.io/autoresearch-medimage/)
 · [Try in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
@@ -26,7 +24,7 @@ promising candidates for longer.
 
 Built by [Matthew Lungren](https://github.com/mattlungrenmd).
 
-The workflow is deliberately small:
+The experiment workflow:
 
 1. **Prepare:** validate the image manifest, labels, masks, and fixed splits.
 2. **Search and refine:** compare short runs, record outcomes, and retain promising branches.
@@ -42,7 +40,7 @@ The workflow is deliberately small:
 | Evaluation | Validation-based candidate selection; held-out test evaluation for final reporting |
 | Runtime | Local GPU workflows and Google Colab notebooks |
 
-## Worked Example: Why Longer Follow-Up Matters
+## ChestXray14 Experiments
 
 In the documented ChestXray14 local experiment series, the short-search promoted
 winner rerun reached **81.09% mean AUC** at 10 epochs; an alternate recipe reached
@@ -52,7 +50,7 @@ their ranking.
 These are reported values from the March 14–15, 2026 case-study note, not
 independently reproduced or held-out test results. See the
 [full case study](examples/chestxray14/case_study.md) for all four candidates and
-the [project page](https://mattlungrenmd.github.io/autoresearch-medimage/#case-study)
+the [project page](https://mattlungrenmd.github.io/autoresearch-medimage/#results)
 for the visual comparison.
 
 ## Explore the Implementation
