@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Autonomous experiment search for 2D medical imaging. Explore reproducible training recipes, refine promising candidates, and keep final evaluation separate from search.">
+  <meta name="theme-color" content="#123e3b">
+  <meta property="og:title" content="autoresearch-medimage | Autonomous search. Deliberate validation.">
+  <meta property="og:description" content="A reproducible research workflow for your medical images: fixed-budget search, candidate refinement, and longer follow-up training.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://mattlungrenmd.github.io/autoresearch-medimage/">
+  <meta property="og:image" content="https://mattlungrenmd.github.io/autoresearch-medimage/assets/workflow.svg">
+  <title>autoresearch-medimage | Autonomous search. Deliberate validation.</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="wordmark" href="#" aria-label="autoresearch-medimage home"><img src="assets/favicon.svg" alt="" width="30" height="30"><span>autoresearch<span class="wordmark-divider">/</span><strong>medimage</strong></span></a>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu <span aria-hidden="true">+</span></button>
+    <nav id="site-nav" aria-label="Main navigation">
+      <a href="#workflow">Workflow</a><a href="#tasks">Your data</a><a href="#case-study">Case study</a><a href="#get-started">Get started</a>
+      <a class="nav-github" href="https://github.com/mattlungrenmd/autoresearch-medimage">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero section-shell" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Open-source medical imaging research</p>
+        <h1 id="hero-title">Autonomous search.<br><em>Deliberate validation.</em></h1>
+        <p class="hero-description">A small, reproducible workflow for exploring models, losses, and training recipes on your 2D medical images.</p>
+        <p class="hero-detail">Let short, fixed-budget experiments surface promising candidates. Refine the search, train the finalists longer, and reserve held-out evaluation for the final report.</p>
+        <div class="actions">
+          <a class="button button-primary" href="https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb">Try in Colab <span aria-hidden="true">↗</span></a>
+          <a class="button button-secondary" href="https://github.com/mattlungrenmd/autoresearch-medimage">Explore the code <span aria-hidden="true">↗</span></a>
+        </div>
+        <p class="hero-credit">A medical-imaging adaptation of <a href="https://github.com/karpathy/autoresearch">Andrej Karpathy’s autoresearch</a>.<br>Built by <a href="https://profiles.stanford.edu/matthew-lungren">Matthew P. Lungren, MD, MPH</a>.</p>
+      </div>
+      <figure class="hero-figure">
+        <img src="assets/research-loop.svg" alt="Research workflow: prepare a labeled dataset, search training recipes using validation scores, promote diverse candidates, then produce the final report." width="720" height="660" fetchpriority="high">
+        <figcaption><span>01 / The research loop</span><span>Schematic · no patient data</span></figcaption>
+      </figure>
+    </section>
+
+    <div class="facts-strip section-shell" aria-label="Project facts">
+      <div><span class="fact-label">Scope</span><strong>2D medical images</strong></div>
+      <div><span class="fact-label">Tasks</span><strong>Classification · Segmentation</strong></div>
+      <div><span class="fact-label">Runtime</span><strong>Local GPU or Colab</strong></div>
+      <div><span class="fact-label">License</span><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/LICENSE">MIT <span aria-hidden="true">↗</span></a></div>
+    </div>
+
+    <section id="workflow" class="section-shell section-space" aria-labelledby="workflow-title">
+      <div class="section-heading"><p class="eyebrow">The method</p><h2 id="workflow-title">A small contract.<br>A complete experiment loop.</h2><p>Keep the data and evaluation contract stable while exploring the training recipe. Each run leaves a record you can inspect, compare, and revisit.</p></div>
+      <div class="workflow-steps">
+        <article><div class="step-top"><span>01</span><span>Prepare</span></div><h3>Start with your data.</h3><p>Use labeled image folders or an explicit manifest with splits, class labels, and segmentation masks. Validate the dataset before launching experiments.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/docs/BRING_YOUR_OWN_DATA.md">Dataset contract <span aria-hidden="true">↗</span></a><p class="file-note"><code>prepare.py</code> stays fixed during search</p></article>
+        <article><div class="step-top"><span>02</span><span>Search & refine</span></div><h3>Explore under a budget.</h3><p>Compare backbones, losses, augmentation, and optimization with short runs. The optional adaptive loop tracks candidate lineage and keeps multiple promising branches alive.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/tools/run_search_session.py">Search implementation <span aria-hidden="true">↗</span></a><p class="file-note"><code>train.py</code> + recipes + <code>results.tsv</code></p></article>
+        <article><div class="step-top"><span>03</span><span>Train & evaluate</span></div><h3>Give finalists more time.</h3><p>Promote diverse candidates to longer training. Make search decisions on validation data; use the held-out test split for the final evaluation of saved checkpoints.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/tools/run_full_train_queue.py">Promotion workflow <span aria-hidden="true">↗</span></a><p class="file-note">Longer runs → final evaluation → report</p></article>
+      </div>
+      <aside class="method-note"><span class="note-mark" aria-hidden="true">↳</span><p><strong>The medical-imaging adaptation.</strong> Task-specific metrics, image manifests, masks, vision backbones, and staged follow-up runs extend the original autoresearch idea. The research loop remains deliberately small.</p></aside>
+    </section>
+
+    <section id="tasks" class="tasks-section" aria-labelledby="tasks-title">
+      <div class="section-shell tasks-layout">
+        <div><p class="eyebrow">Bring your own data</p><h2 id="tasks-title">Your images.<br>A consistent contract.</h2><p class="section-intro">Start with a supported task and describe the dataset once. Recipes make the training choices explicit.</p>
+          <div class="task-tabs" role="tablist" aria-label="Supported imaging tasks" aria-orientation="vertical">
+            <button id="tab-classification" type="button" role="tab" aria-selected="true" aria-controls="panel-classification" tabindex="0" data-task="classification"><span>01</span><span>Classification<small>One label per image</small></span><span aria-hidden="true">↗</span></button>
+            <button id="tab-multilabel" type="button" role="tab" aria-selected="false" aria-controls="panel-multilabel" tabindex="-1" data-task="multilabel"><span>02</span><span>Multilabel classification<small>Several findings per image</small></span><span aria-hidden="true">↗</span></button>
+            <button id="tab-segmentation" type="button" role="tab" aria-selected="false" aria-controls="panel-segmentation" tabindex="-1" data-task="segmentation"><span>03</span><span>Binary segmentation<small>Foreground and background masks</small></span><span aria-hidden="true">↗</span></button>
+          </div>
+        </div>
+        <div class="task-details">
+          <div id="panel-classification" role="tabpanel" aria-labelledby="tab-classification" tabindex="0">
+            <div class="panel-label">EXAMPLE MANIFEST <span>dataset.yaml</span></div><pre><code>name: your_dataset
+task: classification
+metric: auc
+num_classes: 2
+class_names: [negative, positive]
+in_channels: 1
+image_size: 224</code></pre><div class="task-description"><h3>Compare candidate classifiers.</h3><p>Examples include fundus or OCT classification. Supported metrics include accuracy, AUC, F1, macro F1, and quadratic kappa.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/recipes/template_classification.yaml">Classification recipe <span aria-hidden="true">↗</span></a></div>
+          </div>
+          <div id="panel-multilabel" role="tabpanel" aria-labelledby="tab-multilabel" tabindex="0" hidden>
+            <div class="panel-label">EXAMPLE MANIFEST <span>dataset.yaml</span></div><pre><code>name: your_dataset
+task: multilabel
+metric: mean_auc
+num_classes: 2
+class_names: [finding_a, finding_b]
+in_channels: 1
+image_size: 224</code></pre><div class="task-description"><h3>Search across multiple findings.</h3><p>Use a multi-hot label vector for each image. Chest X-ray multilabel classification is the included worked example.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/recipes/template_multilabel.yaml">Multilabel recipe <span aria-hidden="true">↗</span></a></div>
+          </div>
+          <div id="panel-segmentation" role="tabpanel" aria-labelledby="tab-segmentation" tabindex="0" hidden>
+            <div class="panel-label">EXAMPLE MANIFEST <span>dataset.yaml</span></div><pre><code>name: your_dataset
+task: segmentation
+metric: dice
+num_classes: 2
+class_names: [background, foreground]
+in_channels: 1
+image_size: 256</code></pre><div class="task-description"><h3>Learn a binary mask.</h3><p>Pair image paths with foreground-mask paths in the split manifest. The current segmentation workflow supports two classes.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/recipes/template_segmentation.yaml">Segmentation recipe <span aria-hidden="true">↗</span></a></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="case-study" class="section-shell section-space case-section" aria-labelledby="case-title">
+      <div class="case-heading"><div><p class="eyebrow">A worked example / ChestXray14</p><h2 id="case-title">A promising short run<br>is a starting point.</h2></div><p>The documented ChestXray14 experiment series shows why longer follow-up matters: the short-search promoted winner was overtaken by other candidates after 10 epochs.</p></div>
+      <div class="case-evidence">
+        <div class="evidence-header"><div><strong>Longer-run candidate comparison</strong><span>Reported mean AUC (%) · 10 epochs</span></div><div class="view-switch" role="group" aria-label="Case study display"><button type="button" data-view="chart" aria-pressed="true">Chart</button><button type="button" data-view="table" aria-pressed="false">Table</button></div></div>
+        <div id="results-chart" class="results-chart" role="figure" aria-label="Reported mean AUC at 10 epochs: alternate EfficientNet-B0 recipe 84.80, DenseNet169 84.73, ResNet50 84.49, short-search promoted EfficientNet-B0 winner 81.09.">
+          <div class="chart-axis" aria-hidden="true"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+          <div class="chart-row"><div class="chart-label"><strong>EfficientNet-B0</strong><span>Alternate recipe</span></div><div class="bar-track" aria-hidden="true"><div class="bar best" style="--score:84.802390%"></div></div><span class="chart-value">84.80</span></div>
+          <div class="chart-row"><div class="chart-label"><strong>DenseNet169</strong><span>Promoted runner-up</span></div><div class="bar-track" aria-hidden="true"><div class="bar" style="--score:84.726800%"></div></div><span class="chart-value">84.73</span></div>
+          <div class="chart-row"><div class="chart-label"><strong>ResNet50</strong><span>Promoted runner-up</span></div><div class="bar-track" aria-hidden="true"><div class="bar" style="--score:84.486692%"></div></div><span class="chart-value">84.49</span></div>
+          <div class="chart-row promoted"><div class="chart-label"><strong>EfficientNet-B0</strong><span>Short-search promoted winner</span></div><div class="bar-track" aria-hidden="true"><div class="bar original" style="--score:81.088263%"></div></div><span class="chart-value">81.09</span></div>
+        </div>
+        <div id="results-table" class="results-table" hidden><table><caption class="sr-only">ChestXray14 local experiment series: reported mean AUC at 10 epochs</caption><thead><tr><th scope="col">Backbone</th><th scope="col">Candidate</th><th scope="col">Mean AUC (%)</th></tr></thead><tbody><tr><th scope="row">EfficientNet-B0</th><td>Alternate recipe</td><td>84.802390</td></tr><tr><th scope="row">DenseNet169</th><td>Promoted runner-up</td><td>84.726800</td></tr><tr><th scope="row">ResNet50</th><td>Promoted runner-up</td><td>84.486692</td></tr><tr><th scope="row">EfficientNet-B0</th><td>Short-search promoted winner rerun</td><td>81.088263</td></tr></tbody></table></div>
+        <div class="evidence-footer"><p>One local experiment series, March 14–15, 2026. These are the values recorded in the case-study note; they are not presented as independently reproduced or held-out test results.</p><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/examples/chestxray14/case_study.md">Read the full case study <span aria-hidden="true">↗</span></a></div>
+      </div>
+      <p class="case-takeaway"><span aria-hidden="true">↳</span> <strong>Use the short search to find candidates. Use longer runs to compare the finalists.</strong></p>
+    </section>
+
+    <section id="get-started" class="start-section" aria-labelledby="start-title"><div class="section-shell start-layout">
+      <div><p class="eyebrow">From overview to experiment</p><h2 id="start-title">Run the first experiment.</h2><p class="section-intro">Use the Colab notebook to get started in a browser, or install locally with Python 3.10+ and uv.</p><a class="button button-light" href="https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb">Open the Colab notebook <span aria-hidden="true">↗</span></a><a class="start-guide" href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/docs/GPU_SETUP.md">Local GPU setup guide <span aria-hidden="true">↗</span></a><p class="start-note">Local smoke test uses the included tiny fixture and no pretrained weights. Benchmark runs require their datasets and appropriate compute.</p></div>
+      <div class="code-window"><div class="code-toolbar"><div role="tablist" aria-label="Quick start commands"><button id="tab-custom-code" role="tab" type="button" aria-selected="true" aria-controls="code-custom" tabindex="0" data-code="custom">Your dataset</button><button id="tab-smoke-code" role="tab" type="button" aria-selected="false" aria-controls="code-smoke" tabindex="-1" data-code="smoke">Smoke test</button></div><button type="button" id="copy-code" aria-label="Copy quick start commands">Copy</button></div>
+        <div id="code-custom" role="tabpanel" aria-labelledby="tab-custom-code" tabindex="0"><pre><code>git clone https://github.com/mattlungrenmd/autoresearch-medimage.git
+cd autoresearch-medimage
+uv sync --locked
+
+# Prepare your labeled image folder
+uv run prepare.py --data /path/to/your/images
+
+# Use the dataset name printed during preparation
+uv run train.py --dataset your_dataset</code></pre></div>
+        <div id="code-smoke" role="tabpanel" aria-labelledby="tab-smoke-code" tabindex="0" hidden><pre><code>git clone https://github.com/mattlungrenmd/autoresearch-medimage.git
+cd autoresearch-medimage
+uv sync --locked
+
+# Validate the included tiny dataset
+uv run prepare.py --dataset toy_binary
+
+# Exercise a short local training run
+uv run train.py --recipe toy_binary_smoke --time-budget 5</code></pre></div>
+        <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </div></section>
+
+    <section class="section-shell section-space context-section" aria-labelledby="context-title"><div><p class="eyebrow">Research context</p><h2 id="context-title">Built for an inspectable<br>research process.</h2><p>The current release supports 2D classification, multilabel classification, and binary segmentation. Search-time selection uses validation data; held-out test reporting is a separate final step.</p><p>This is research software. Clinical use requires additional validation, and current scope is described in the project documentation.</p><div class="context-links"><a href="https://github.com/mattlungrenmd/autoresearch-medimage/actions/workflows/ci.yml">Automated code checks <span aria-hidden="true">↗</span></a><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/docs/ROADMAP.md">Scope & roadmap <span aria-hidden="true">↗</span></a></div></div><div class="author-block"><p class="eyebrow">Author & acknowledgments</p><h3>Matthew P. Lungren,<br>MD, MPH</h3><p>Physician-scientist focused on clinical AI evaluation and multimodal medical AI. Co-founder of Stanford AIMI and former Chief Scientific Officer for Health and Life Sciences at Microsoft.</p><a href="https://profiles.stanford.edu/matthew-lungren">Stanford profile <span aria-hidden="true">↗</span></a><hr><p class="acknowledgment">Inspired by <a href="https://github.com/karpathy/autoresearch">karpathy/autoresearch</a>: a minimal, fixed contract for an autonomous research loop. This project adapts that idea to medical imaging.</p></div></section>
+  </main>
+  <footer class="site-footer section-shell"><a class="footer-title" href="#">autoresearch / medimage</a><p>Reproducible candidate discovery for medical imaging AI.</p><div><a href="https://github.com/mattlungrenmd/autoresearch-medimage">Source code ↗</a><a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/LICENSE">MIT license ↗</a></div></footer>
+</body>
+</html>
