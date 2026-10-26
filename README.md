@@ -1,8 +1,23 @@
+<div align="center">
+
 # autoresearch-medimage
+
+**Autonomous search. Deliberate validation.**
+
+Reproducible candidate discovery for 2D medical imaging AI.
+
+[Project page](https://mattlungrenmd.github.io/autoresearch-medimage/)
+· [Try in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
+· [Dataset guide](docs/BRING_YOUR_OWN_DATA.md)
+· [Case study](examples/chestxray14/case_study.md)
 
 [![Code checks](https://github.com/mattlungrenmd/autoresearch-medimage/actions/workflows/ci.yml/badge.svg)](https://github.com/mattlungrenmd/autoresearch-medimage/actions/workflows/ci.yml)
 
-**Reproducible candidate discovery for medical imaging AI.**
+</div>
+
+![A four-stage workflow: prepare labeled 2D images and fixed splits, search recipes using validation scores, train diverse finalists longer, and evaluate saved checkpoints on held-out test data.](docs/site/assets/workflow.svg)
+
+## Overview
 
 A Python/PyTorch adaptation of [Andrej Karpathy's `autoresearch`](https://github.com/karpathy/autoresearch)
 for labeled 2D medical images. Compare model backbones, losses, augmentations,
@@ -11,9 +26,11 @@ promising candidates for longer.
 
 Built by [Matthew Lungren](https://github.com/mattlungrenmd).
 
-[Try in Colab](https://colab.research.google.com/github/mattlungrenmd/autoresearch-medimage/blob/main/notebooks/colab_quickstart.ipynb)
-· [Bring your own data](docs/BRING_YOUR_OWN_DATA.md)
-· [ChestXray14 case study](examples/chestxray14/case_study.md)
+The workflow is deliberately small:
+
+1. **Prepare:** validate the image manifest, labels, masks, and fixed splits.
+2. **Search and refine:** compare short runs, record outcomes, and retain promising branches.
+3. **Train and evaluate:** train diverse finalists longer, then use held-out data for the final report.
 
 ## Project at a Glance
 
@@ -24,6 +41,19 @@ Built by [Matthew Lungren](https://github.com/mattlungrenmd).
 | Search | Optional adaptive search with candidate lineage, refinement, and promotion runs |
 | Evaluation | Validation-based candidate selection; held-out test evaluation for final reporting |
 | Runtime | Local GPU workflows and Google Colab notebooks |
+
+## Worked Example: Why Longer Follow-Up Matters
+
+In the documented ChestXray14 local experiment series, the short-search promoted
+winner rerun reached **81.09% mean AUC** at 10 epochs; an alternate recipe reached
+**84.80%**. The short search surfaced candidates, while longer training changed
+their ranking.
+
+These are reported values from the March 14–15, 2026 case-study note, not
+independently reproduced or held-out test results. See the
+[full case study](examples/chestxray14/case_study.md) for all four candidates and
+the [project page](https://mattlungrenmd.github.io/autoresearch-medimage/#case-study)
+for the visual comparison.
 
 ## Explore the Implementation
 
