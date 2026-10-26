@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A PyTorch adaptation of Karpathy's autoresearch for 2D medical imaging. Automated recipe search for classification, multilabel classification, and binary segmentation.">
-  <meta name="theme-color" content="#111113">
+  <meta name="theme-color" content="#0c181c">
   <meta property="og:title" content="autoresearch-medimage · Autonomous research for 2D medical imaging">
   <meta property="og:description" content="Search model backbones and training recipes under a fixed experiment budget, then train selected candidates longer.">
   <meta property="og:type" content="website">
@@ -12,6 +12,7 @@
   <meta property="og:image" content="https://mattlungrenmd.github.io/autoresearch-medimage/assets/workflow.svg">
   <title>autoresearch-medimage · Autonomous research for 2D medical imaging</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <script src="script.js" defer></script>
 </head>
@@ -64,7 +65,7 @@
           <title id="flow-title">Training and validation loop</title>
           <desc id="flow-desc">Images and fixed splits feed train.py. A recipe specifies the backbone, loss, and optimizer. Validation scores are recorded in results.tsv and guide the next recipe.</desc>
           <defs>
-            <linearGradient id="flow-gradient"><stop stop-color="#8488be"/><stop offset="1" stop-color="#d6d8f7"/></linearGradient>
+            <linearGradient id="flow-gradient"><stop stop-color="#6db3a5"/><stop offset="1" stop-color="#dfad83"/></linearGradient>
             <clipPath id="image-clip"><rect x="20" y="131" width="143" height="158" rx="12"/></clipPath>
           </defs>
           <g class="connections" fill="none"><path d="M164 210H234"/><path d="M410 210H480"/><path d="M587 111V155"/><path d="M694 210H764"/><path d="M949 210H993"/><path d="M855 265V345H587V265"/></g>

@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="400" viewBox="0 0 1400 400" role="img" aria-labelledby="title desc">
   <title id="title">Autoresearch for 2D medical imaging</title>
   <desc id="desc">Prepare images and fixed splits, search training recipes using validation metrics, refine selected candidates and train longer, then evaluate saved checkpoints on held-out test data.</desc>
-  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10" fill="none" stroke="#a8afd4" stroke-width="1.5"/></marker></defs>
-  <rect width="1400" height="400" rx="16" fill="#151519"/>
-  <g font-family="Arial,sans-serif">
-    <text x="48" y="58" fill="#ededf2" font-size="30" font-weight="600">autoresearch-medimage</text>
-    <text x="48" y="89" fill="#9c9fb3" font-size="16">Automated recipe search for classification, multilabel classification, and binary segmentation</text>
-    <g fill="#1e1f29" stroke="#414454"><rect x="48" y="130" width="289" height="213" rx="12"/><rect x="386" y="130" width="289" height="213" rx="12"/><rect x="724" y="130" width="289" height="213" rx="12"/><rect x="1062" y="130" width="289" height="213" rx="12"/></g>
-    <g fill="none" stroke="#a8afd4" stroke-width="2" marker-end="url(#arrow)"><path d="M345 238H375"/><path d="M683 238H713"/><path d="M1021 238H1051"/></g>
-    <g font-family="monospace" fill="#949bbd" font-size="12"><text x="70" y="161">01 / DATA</text><text x="408" y="161">02 / SEARCH</text><text x="746" y="161">03 / FOLLOW-UP</text><text x="1084" y="161">04 / EVALUATION</text></g>
-    <g fill="#c3c7ef" font-size="25"><text x="70" y="217">Dataset definition</text><text x="408" y="217">Training recipes</text><text x="746" y="217">Longer training</text><text x="1084" y="217">Test metrics</text></g>
-    <g fill="#a4a9c0" font-size="15"><text x="70" y="260">Images, labels, or binary masks</text><text x="70" y="288">Fixed train / val / test splits</text><text x="408" y="260">Backbone, loss, augmentation</text><text x="408" y="288">Fixed budget · validation scores</text><text x="746" y="260">Refined and diverse candidates</text><text x="746" y="288">Saved model checkpoints</text><text x="1084" y="260">Held-out evaluation</text><text x="1084" y="288">Final report and run artifacts</text></g>
-    <g font-family="monospace" fill="#747c9b" font-size="11"><text x="48" y="377">prepare.py → train.py → results.tsv</text><text x="1350" y="377" text-anchor="end">Workflow schematic</text></g>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10" fill="none" stroke="#6db3a5" stroke-width="1.5"/></marker></defs>
+  <rect width="1400" height="400" rx="16" fill="#0c181c"/>
+  <g font-family="Helvetica Neue,Arial,sans-serif">
+    <text x="48" y="58" fill="#f2ede3" font-size="30" font-weight="600">autoresearch-medimage</text>
+    <text x="48" y="89" fill="#a2b5b6" font-size="16">Automated recipe search for classification, multilabel classification, and binary segmentation</text>
+    <g fill="#132328" stroke="#32494e"><rect x="48" y="130" width="289" height="213" rx="12"/><rect x="386" y="130" width="289" height="213" rx="12"/><rect x="724" y="130" width="289" height="213" rx="12"/><rect x="1062" y="130" width="289" height="213" rx="12"/></g>
+    <g fill="none" stroke="#6db3a5" stroke-width="2" marker-end="url(#arrow)"><path d="M345 238H375"/><path d="M683 238H713"/><path d="M1021 238H1051"/></g>
+    <g font-family="monospace" fill="#dfad83" font-size="12"><text x="70" y="161">01 / DATA</text><text x="408" y="161">02 / SEARCH</text><text x="746" y="161">03 / FOLLOW-UP</text><text x="1084" y="161">04 / EVALUATION</text></g>
+    <g fill="#95d5c5" font-size="25"><text x="70" y="217">Dataset definition</text><text x="408" y="217">Training recipes</text><text x="746" y="217">Longer training</text><text x="1084" y="217">Test metrics</text></g>
+    <g fill="#a2b5b6" font-size="15"><text x="70" y="260">Images, labels, or binary masks</text><text x="70" y="288">Fixed train / val / test splits</text><text x="408" y="260">Backbone, loss, augmentation</text><text x="408" y="288">Fixed budget · validation scores</text><text x="746" y="260">Refined and diverse candidates</text><text x="746" y="288">Saved model checkpoints</text><text x="1084" y="260">Held-out evaluation</text><text x="1084" y="288">Final report and run artifacts</text></g>
+    <g font-family="monospace" fill="#829a9f" font-size="11"><text x="48" y="377">prepare.py → train.py → results.tsv</text><text x="1350" y="377" text-anchor="end">Workflow schematic</text></g>
   </g>
 </svg>
