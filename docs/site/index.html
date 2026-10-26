@@ -133,7 +133,7 @@
     <section id="results" class="content-section page-width" aria-labelledby="results-title">
       <div class="section-intro"><p class="section-label">03 / Experiments</p><h2 id="results-title">ChestXray14 case study</h2><p>In the documented local experiment series, candidate rankings changed after longer training. The recipe promoted from the short search reached 81.09% mean AUC at 10 epochs; three alternatives reached 84.49–84.80%.</p></div>
       <div class="results-panel">
-        <div class="results-heading"><div><h3>Candidate comparison</h3><p>Mean AUC (%) · 10 epochs</p></div><div class="view-switch" role="group" aria-label="Results display"><button type="button" data-view="chart" aria-pressed="true">Chart</button><button type="button" data-view="table" aria-pressed="false">Table</button></div></div>
+        <div class="results-heading"><div><h3>Local candidate comparison</h3><p>Mean AUC (%) · 10 epochs</p></div><div class="view-switch" role="group" aria-label="Results display"><button type="button" data-view="chart" aria-pressed="true">Chart</button><button type="button" data-view="table" aria-pressed="false">Table</button></div></div>
         <div id="results-chart" class="results-chart" role="figure" aria-label="Mean AUC after 10 epochs: alternate EfficientNet-B0 recipe 84.80, DenseNet169 84.73, ResNet50 84.49, short-search promoted EfficientNet-B0 81.09. Axis zero to 100 percent.">
           <div class="chart-axis" aria-hidden="true"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
           <div class="chart-row"><div class="chart-label"><strong>EfficientNet-B0</strong><span>Alternate recipe</span></div><div class="bar-track" aria-hidden="true"><div class="bar best" style="--score:84.802390%"></div></div><span class="chart-value">84.80</span></div>
@@ -143,6 +143,16 @@
         </div>
         <div id="results-table" class="results-table" hidden><table><caption class="sr-only">ChestXray14 local experiments: mean AUC after 10 epochs</caption><thead><tr><th scope="col">Backbone</th><th scope="col">Candidate</th><th scope="col">Mean AUC (%)</th></tr></thead><tbody><tr><th scope="row">EfficientNet-B0</th><td>Alternate recipe</td><td>84.802390</td></tr><tr><th scope="row">DenseNet169</th><td>Promoted runner-up</td><td>84.726800</td></tr><tr><th scope="row">ResNet50</th><td>Promoted runner-up</td><td>84.486692</td></tr><tr><th scope="row">EfficientNet-B0</th><td>Short-search promoted recipe</td><td>81.088263</td></tr></tbody></table></div>
         <p class="results-source">Values recorded in the local case-study note, March 14–15, 2026. The note does not report independent replication or held-out test results. <a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/examples/chestxray14/case_study.md">Source and experiment context ↗</a></p>
+      </div>
+
+      <div class="literature-panel" aria-labelledby="literature-title">
+        <div class="literature-intro"><h3 id="literature-title">Literature references</h3><p>Test-set AUROC across the same 14 findings, under each paper’s evaluation protocol.</p></div>
+        <table class="literature-table"><caption class="sr-only">Published ChestXray14 reference results and evaluation protocols</caption><thead><tr><th scope="col">Method / evaluation</th><th scope="col">Mean AUROC (%)</th></tr></thead><tbody>
+            <tr><th scope="row"><a href="https://arxiv.org/pdf/1705.02315v5#page=17">Wang et al. <span aria-hidden="true">↗</span></a><span class="reference-meta">ResNet-50 · 2017</span><span class="reference-protocol">Published patient-wise test split</span></th><td>74.51</td></tr>
+            <tr><th scope="row"><a href="https://arxiv.org/html/1711.05225v3">CheXNet <span aria-hidden="true">↗</span></a><span class="reference-meta">DenseNet-121 · 2017</span><span class="reference-protocol">Patient-disjoint 70/10/20 split</span></th><td>84.14</td></tr>
+            <tr><th scope="row"><a href="https://arxiv.org/html/2505.06646v3">DACNet (Strick et al.) <span aria-hidden="true">↗</span></a><span class="reference-meta">DenseNet-121 · 2025 / 2026 revision</span><span class="reference-protocol">Stratified patient-level split</span></th><td>85.27</td></tr>
+        </tbody></table>
+        <p class="literature-source">Wang and CheXNet means are calculated from their 14 per-finding values (Table 17 and Table 2, respectively). DACNet’s mean is reported in Table 3 of the 2026 revision. These are literature references, not reruns on a shared test set; the local candidate runs above do not have an archived held-out test report. <a href="data/chestxray14-literature.json">Values and sources ↗</a> · <a href="https://github.com/mattlungrenmd/autoresearch-medimage/blob/main/examples/chestxray14/benchmark.md">Per-finding results ↗</a></p>
       </div>
       <a class="section-next" href="#get-started" aria-label="Next section: Getting started">⌄</a>
     </section>

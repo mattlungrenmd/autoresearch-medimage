@@ -1,0 +1,92 @@
+{
+  "metric": "Unweighted mean AUROC across 14 findings",
+  "scale": "AUROC values in this file are on the 0 to 1 scale; website tables display percentages.",
+  "reviewed": "2026-10-26",
+  "comparison_note": "Literature context, not a matched-protocol ranking. The local candidate result has no archived held-out test report in the repository.",
+  "references": [
+    {
+      "id": "wang2017",
+      "method": "Wang et al.",
+      "backbone": "ResNet-50",
+      "year": "2017",
+      "mean_auroc": 0.7451428571428572,
+      "mean_basis": "Calculated: unweighted mean of the 14 ChestX-ray14 AUROCs in Table 17.",
+      "protocol": "Published patient-wise test split",
+      "source": "https://arxiv.org/pdf/1705.02315v5#page=17",
+      "source_table": "Table 17; Appendix B.2",
+      "version": "1705.02315v5",
+      "per_finding": {
+        "Atelectasis": 0.7003,
+        "Cardiomegaly": 0.81,
+        "Effusion": 0.7585,
+        "Infiltration": 0.6614,
+        "Mass": 0.6933,
+        "Nodule": 0.6687,
+        "Pneumonia": 0.658,
+        "Pneumothorax": 0.7993,
+        "Consolidation": 0.7032,
+        "Edema": 0.8052,
+        "Emphysema": 0.833,
+        "Fibrosis": 0.7859,
+        "Pleural Thickening": 0.6835,
+        "Hernia": 0.8717
+      }
+    },
+    {
+      "id": "chexnet2017",
+      "method": "CheXNet",
+      "backbone": "DenseNet-121",
+      "year": "2017",
+      "mean_auroc": 0.8413785714285714,
+      "mean_basis": "Calculated: unweighted mean of the 14 AUROCs in Table 2.",
+      "protocol": "Patient-disjoint 70/10/20 split",
+      "source": "https://arxiv.org/html/1711.05225v3",
+      "source_table": "Table 2; Section 5",
+      "version": "1711.05225v3",
+      "per_finding": {
+        "Atelectasis": 0.8094,
+        "Cardiomegaly": 0.9248,
+        "Effusion": 0.8638,
+        "Infiltration": 0.7345,
+        "Mass": 0.8676,
+        "Nodule": 0.7802,
+        "Pneumonia": 0.768,
+        "Pneumothorax": 0.8887,
+        "Consolidation": 0.7901,
+        "Edema": 0.8878,
+        "Emphysema": 0.9371,
+        "Fibrosis": 0.8047,
+        "Pleural Thickening": 0.8062,
+        "Hernia": 0.9164
+      }
+    },
+    {
+      "id": "dacnet2026",
+      "method": "DACNet (Strick et al.)",
+      "backbone": "DenseNet-121",
+      "year": "2025 / 2026 revision",
+      "mean_auroc": 0.8527,
+      "mean_basis": "Reported test mean in Table 3; per-finding values in Table 2 are rounded.",
+      "protocol": "Stratified patient-level split",
+      "source": "https://arxiv.org/html/2505.06646v3",
+      "source_table": "Tables 2 and 3; Evaluation Results",
+      "version": "2505.06646v3",
+      "per_finding": {
+        "Atelectasis": 0.817,
+        "Cardiomegaly": 0.932,
+        "Effusion": 0.905,
+        "Infiltration": 0.708,
+        "Mass": 0.919,
+        "Nodule": 0.789,
+        "Pneumonia": 0.74,
+        "Pneumothorax": 0.875,
+        "Consolidation": 0.783,
+        "Edema": 0.896,
+        "Emphysema": 0.963,
+        "Fibrosis": 0.814,
+        "Pleural Thickening": 0.801,
+        "Hernia": 0.997
+      }
+    }
+  ]
+}

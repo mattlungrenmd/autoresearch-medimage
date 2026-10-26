@@ -362,3 +362,32 @@ details li { margin-top: 8px; }
   body:not(.motion-enabled) .gallery-column { transform: translateY(-18%); }
   body:not(.motion-enabled) .signal { stroke-dasharray: none; opacity: .4; }
 }
+
+/* Literature context retains each paper's evaluation protocol. */
+.literature-panel { margin-top: 28px; border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: #17171d; }
+.literature-intro { padding: 24px 30px 20px; border-bottom: 1px solid var(--border); }
+.literature-intro p { color: #9296aa; font-size: 12px; margin-top: 6px; }
+.literature-table { width: 100%; border-collapse: collapse; text-align: left; }
+.literature-table th,.literature-table td { padding: 20px 30px; border-bottom: 1px solid #30323f; }
+.literature-table thead th { font: 500 10px var(--mono); color: #9299b4; text-transform: uppercase; letter-spacing: .04em; }
+.literature-table tbody th { font-weight: 500; font-size: 14px; }
+.literature-table tbody th>a { color: #d4d9f7; text-decoration: none; }
+.literature-table tbody th>a:hover { text-decoration: underline; }
+.literature-table th:last-child,.literature-table td:last-child { width: 200px; text-align: right; }
+.literature-table td:last-child { color: #d6defe; font: 15px var(--mono); }
+.reference-meta,.reference-protocol { display: block; font-weight: 400; font-size: 10px; color: #9299b4; margin-top: 5px; }
+.reference-protocol { margin-top: 2px; color: #858ba2; }
+.literature-source { padding: 20px 30px; color: #9296aa; font-size: 11px; line-height: 1.9; }
+.literature-source a { color: #bcc3e7; }
+@media(max-width: 800px) {
+  .literature-intro { padding: 20px; }
+  .literature-intro h3 { font-size: 14px; }
+  .literature-intro p { font-size: 11px; }
+  .literature-table th,.literature-table td { padding: 17px 20px; }
+  .literature-table thead th { font-size: 8px; line-height: 1.6; }
+  .literature-table tbody th { font-size: 12px; }
+  .literature-table th:last-child,.literature-table td:last-child { width: 100px; }
+  .literature-table td:last-child { font-size: 13px; }
+  .reference-meta,.reference-protocol { font-size: 9px; }
+  .literature-source { padding: 17px 20px; font-size: 10px; }
+}

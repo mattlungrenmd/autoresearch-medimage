@@ -70,3 +70,9 @@ For this kind of workload, the repo is strongest as:
 
 It should not be read as a promise that one short search or one promotion rule
 will always pick the final best model automatically.
+
+## Literature Context
+
+See [benchmark.md](benchmark.md) for versioned literature results and per-finding
+AUROCs. The local candidate scores in this note do not include an archived
+held-out test report and are presented separately from those references.
