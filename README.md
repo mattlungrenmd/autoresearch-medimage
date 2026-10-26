@@ -53,6 +53,9 @@ independently reproduced or held-out test results. See the
 the [project page](https://mattlungrenmd.github.io/autoresearch-medimage/#results)
 for the visual comparison.
 
+Literature reference results and evaluation protocols are documented in the
+[benchmark notes](examples/chestxray14/benchmark.md).
+
 ## Explore the Implementation
 
 | Start here | What to review |
